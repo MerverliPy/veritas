@@ -164,6 +164,13 @@ def _rescore_main(run_dir: Path, queries: list[dict], gold_dir: Path,
         return 2
     per_query = []
     for q in queries:
+        if q.get("_unresolved"):
+            per_query.append({"id": q["id"], "class": None, "query": "",
+                              "ok": False,
+                              "error": "query id recorded in the run is "
+                                       "missing from the queries spec",
+                              "metrics": {}})
+            continue
         qout = run_dir / q["id"]
         if not (qout / "ledger.json").exists():
             per_query.append({"id": q["id"], "class": q.get("class"),
@@ -290,16 +297,25 @@ def main() -> int:
 
     if args.rescore:
         run_dir = Path(args.rescore)
-        # A run may contain fewer queries than queries.json: inherit its own
-        # query set unless --ids narrowed the selection.
         orig_scorecard = run_dir / "scorecard.json"
-        if args.ids is None and orig_scorecard.exists():
-            orig_ids = set(load_json(orig_scorecard)
-                           .get("provenance", {}).get("query_ids", []))
-            if orig_ids:
-                queries = [q for q in queries if q["id"] in orig_ids]
-        return _rescore_main(run_dir, queries, gold_dir,
-                             judge_enabled, relevance, args.no_crosscheck)
+        nocc_orig = False
+        orig_ids = []
+        if orig_scorecard.exists():
+            prov = load_json(orig_scorecard).get("provenance", {})
+            nocc_orig = prov.get("crosscheck") == "off"
+            orig_ids = prov.get("query_ids", [])
+        if args.ids is None and orig_ids:
+            # The run's recorded query set is authoritative: any recorded id
+            # missing from the current spec makes the rescore unresolvable.
+            by_id = {q["id"]: q for q in queries}
+            resolved = [by_id[i] for i in orig_ids if i in by_id]
+            missing = [i for i in orig_ids if i not in by_id]
+            for i in missing:
+                resolved.append({"id": i, "class": None, "query": "",
+                                 "_unresolved": True})
+            queries = resolved
+        return _rescore_main(run_dir, queries, gold_dir, judge_enabled,
+                             relevance, args.no_crosscheck or nocc_orig)
 
     arm = "nocc" if args.no_crosscheck else "cc"
     run_id = args.run_id or f"{arm}-{datetime.datetime.now():%Y%m%d-%H%M%S}"

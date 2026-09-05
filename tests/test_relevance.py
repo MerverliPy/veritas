@@ -84,3 +84,13 @@ def test_latest_run_dir_picks_by_mtime_not_name(tmp_path):
     os.utime(old, (1_700_000_000, 1_700_000_000))
     os.utime(new, (1_800_000_000, 1_800_000_000))
     assert _latest_run_dir(tmp_path).name == "det-2"
+
+
+def test_judgements_action_requires_force_on_sample_change():
+    from bench.collect_relevance import judgements_action
+    s1 = [{"url": "https://a.dev"}, {"url": "https://b.dev"}]
+    s2 = [{"url": "https://a.dev"}, {"url": "https://c.dev"}]
+    assert judgements_action(None, s1, False, False) == "write"
+    assert judgements_action(s1, s1, True, False) == "preserve"
+    assert judgements_action(s1, s2, True, False) == "abort"
+    assert judgements_action(s1, s2, True, True) == "write"

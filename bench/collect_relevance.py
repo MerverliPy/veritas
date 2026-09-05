@@ -74,6 +74,21 @@ def extract_sample(ledger: dict, *,
     return out
 
 
+def judgements_action(prev_sample, new_entries, prev_judgements_filled,
+                     force: bool) -> str:
+    """Decide what to do with an existing judgements file:
+    'preserve' when the sample is unchanged and judgements are filled,
+    'write' when there is nothing filled or the sample changed and --force
+    is set, 'abort' when the sample changed under a filled file without
+    --force (silently keeping judgements for different sources would skew
+    A5)."""
+    if not prev_judgements_filled:
+        return "write"
+    if prev_sample == new_entries:
+        return "preserve"
+    return "write" if force else "abort"
+
+
 def _latest_run_dir(out_root: Path) -> Path:
     """Newest run by its scorecard file mtime — run-id names mix prefixes
     (cc-/nocc-/det-...), so name ordering is not chronological."""
@@ -134,11 +149,28 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
-    if judgements_out.exists() and not args.force \
-            and any(v is not None for v in json.loads(
-                judgements_out.read_text(encoding="utf-8"))):
-        print(f"[collect] keeping filled {judgements_out} "
-              f"(rerun with --force to reset)", file=sys.stderr)
+    prev_sample = None
+    if sample_out.exists():
+        try:
+            prev_sample = json.loads(sample_out.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            prev_sample = None
+    prev_filled = False
+    if judgements_out.exists():
+        try:
+            prev_filled = any(v is not None for v in json.loads(
+                judgements_out.read_text(encoding="utf-8")))
+        except json.JSONDecodeError:
+            prev_filled = False
+    action = judgements_action(prev_sample, entries, prev_filled, args.force)
+    if action == "abort":
+        print(f"[collect] sample changed since {judgements_out} was filled "
+              f"— judgements would describe different sources. Rerun with "
+              f"--force to reset them.", file=sys.stderr)
+        return 1
+    if action == "preserve":
+        print(f"[collect] sample unchanged — keeping filled "
+              f"{judgements_out}", file=sys.stderr)
     else:
         judgements_out.write_text(json.dumps([None] * len(entries), indent=2))
     sample_out.write_text(json.dumps(entries, indent=2, ensure_ascii=False))
