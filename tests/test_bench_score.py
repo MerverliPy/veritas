@@ -1,7 +1,10 @@
-"""Hermetic tests for bench/score.py — no network, no LLM."""
+"""Hermetic tests for bench/score.py + driver guard helpers — no network, no LLM."""
 
 from __future__ import annotations
 
+import pytest
+
+from bench.run_benchmark import parse_relevance, select_queries
 from bench.score import (
     compute_query_metrics,
     est_cost_usd,
@@ -262,3 +265,34 @@ def test_gates_detect_failures_and_na():
     # A4 without the paired arm is n/a, never PASS on a mainline fire alone
     assert gates(_all_pass_query_metrics())["A4_crosscheck_benefit"]["ok"] \
         is None
+
+
+# --------------------------------------------------------------------------
+# driver guard helpers (run_benchmark.py)
+# --------------------------------------------------------------------------
+
+def _qs(ids):
+    return [{"id": i, "class": "F", "query": "q"} for i in ids]
+
+
+def test_select_queries_reports_unknown_ids():
+    qs = _qs(["a", "b", "c"])
+    chosen, unknown = select_queries(qs, "a, c")
+    assert [q["id"] for q in chosen] == ["a", "c"] and unknown == []
+    _, unknown = select_queries(qs, "a,nope")
+    assert unknown == ["nope"]          # caller must reject, never silently drop
+    chosen, unknown = select_queries(qs, "nope")
+    assert chosen == [] and unknown == ["nope"]
+
+
+def test_parse_relevance_accepts_binary_only(tmp_path):
+    def write(v):
+        f = tmp_path / "rel.json"
+        f.write_text(__import__("json").dumps(v))
+        return f
+
+    assert parse_relevance(write([0, 1, 1])) == [0, 1, 1]
+    assert parse_relevance(write([1])) == [1]
+    for bad in ([0, 2], [0, -1], [0, "1"], [1.5, 0], [True, 0], "0,1"):
+        with pytest.raises(ValueError):
+            parse_relevance(write(bad))

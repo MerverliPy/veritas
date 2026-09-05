@@ -42,6 +42,33 @@ from bench.score import (  # noqa: E402
 )
 
 
+def select_queries(queries: list[dict], ids: str) -> tuple[list[dict], list[str]]:
+    """Filter ``queries`` by comma-separated ``ids``; return (chosen, unknown).
+    Unknown ids must be rejected by the caller — silently dropping a typo'd
+    mission would let the reduced run look like a complete benchmark."""
+    want = [s.strip() for s in ids.split(",") if s.strip()]
+    by_id = {q["id"]: q for q in queries}
+    chosen = [by_id[w] for w in want if w in by_id]
+    unknown = [w for w in want if w not in by_id]
+    return chosen, unknown
+
+
+def parse_relevance(path: str | Path) -> list[int]:
+    """Load and validate a binary 0/1 relevance-judgement list.
+    Raises ValueError on malformed input — garbage must fail loudly, never
+    skew A5 into a misleading pass (e.g. a stray 2 median >= 0.7)."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        raise ValueError(f"relevance file {path} must be a JSON list of 0/1")
+    out: list[int] = []
+    for i, v in enumerate(data):
+        if isinstance(v, bool) or not isinstance(v, int) or v not in (0, 1):
+            raise ValueError(f"relevance file {path}: item {i} is not 0/1 "
+                             f"(got {v!r})")
+        out.append(v)
+    return out
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -66,8 +93,10 @@ def main() -> int:
     spec = load_json(args.queries)
     queries = spec["queries"]
     if args.ids:
-        want = {s.strip() for s in args.ids.split(",")}
-        queries = [q for q in queries if q["id"] in want]
+        queries, unknown = select_queries(queries, args.ids)
+        if unknown:
+            p.error(f"unknown query id(s): {', '.join(unknown)}")
+    relevance = parse_relevance(args.relevance) if args.relevance else None
 
     arm = "nocc" if args.no_crosscheck else "cc"
     run_id = args.run_id or f"{arm}-{datetime.datetime.now():%Y%m%d-%H%M%S}"
@@ -80,8 +109,8 @@ def main() -> int:
           f"crosscheck={'off' if args.no_crosscheck else 'on'}")
     total_usd = 0.0
     per_query = []
-    capped = False
-    for q in queries:
+    capped = False  # True only once a remaining query is actually skipped
+    for idx, q in enumerate(queries):
         if capped:
             per_query.append(_skipped(q))
             continue
@@ -129,18 +158,16 @@ def main() -> int:
                 entry["note"] = "no gold sheet — structure-only metrics"
         per_query.append(entry)
 
-        if total_usd >= args.cap_usd:
+        remaining = queries[idx + 1:]
+        if total_usd >= args.cap_usd and remaining:
             capped = True
             print(f"[bench] cap ${args.cap_usd:.2f} reached "
-                  f"(cumulative ${total_usd:.4f}) — remainder skipped "
-                  f"(scorecard capped-partial)")
+                  f"(cumulative ${total_usd:.4f}) — skipping "
+                  f"{len(remaining)} remaining (scorecard capped-partial)")
         else:
             print(f"[bench]   est ${cost:.5f} "
                   f"(cumulative ${total_usd:.5f})")
 
-    relevance = None
-    if args.relevance:
-        relevance = [int(v) for v in load_json(args.relevance)]
     completed = [e for e in per_query if e.get("ok") and e.get("metrics")]
     agg = gates([e["metrics"] for e in completed],
                 relevance_judgements=relevance)
@@ -148,8 +175,21 @@ def main() -> int:
                    and not e.get("skipped_cap"))
     n_skipped = sum(1 for e in per_query if e.get("skipped_cap"))
     # Gates over a subset are advisory only: a failed/skipped mission must
-    # not let the rest silently pass as a complete benchmark.
-    valid = (not capped and n_failed == 0 and len(completed) == len(queries))
+    # not let the rest silently pass as a complete benchmark. Cross-check-off
+    # runs are the paired arm — their A1-A6 lines are never authoritative.
+    valid = (not capped and n_failed == 0 and len(completed) == len(queries)
+             and not args.no_crosscheck)
+
+    reasons = []
+    if n_failed:
+        reasons.append(f"{n_failed} failed")
+    if n_skipped:
+        reasons.append(f"{n_skipped} skipped")
+    if capped:
+        reasons.append("capped-partial")
+    if args.no_crosscheck:
+        reasons.append("no-crosscheck arm (paired comparison only)")
+    invalid_reason = ", ".join(reasons) if reasons else ""
 
     provenance = {
         "run_id": run_id,
@@ -179,8 +219,7 @@ def main() -> int:
     print(f"[bench] cumulative est cost: ${total_usd:.4f} "
           f"(cap ${args.cap_usd:.2f}{' — CAPPED-PARTIAL' if capped else ''})")
     if not valid:
-        print(f"[bench] scorecard INVALID ({n_failed} failed, "
-              f"{n_skipped} skipped, capped={capped}) — "
+        print(f"[bench] scorecard INVALID ({invalid_reason}) — "
               f"A1-A6 lines below are advisory only")
     else:
         print("[bench] scorecard VALID — A1-A6 lines below are authoritative")
