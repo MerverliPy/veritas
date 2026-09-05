@@ -33,8 +33,8 @@ from veritas.llm import BaseLLM, LLMError
 GOLD_JUDGE_SYSTEM = """You are a strict gold-standard judge for a research benchmark. A research pipeline produced a CLAIM for the QUERY. Judge whether the claim, as stated, is CORRECT given ONLY the GOLD FACTS below. Gold facts are a SAMPLE of checkable facts, not an exhaustive list of everything true.
 
 Labels:
-- correct: the claim states a fact consistent with a gold 'correct' fact — paraphrase allowed, and true detail the claim adds beyond the gold wording is fine (same entities/figures/scope; the claim must not contradict any gold fact). Example: gold 'researcher registered the kill-switch domain' is matched by 'a 22-year-old UK researcher discovered the kill switch accidentally'.
-- incorrect: the claim contradicts a gold 'correct' fact (different figure/date/country/polarity for the same thing) or matches a gold fact labeled 'incorrect'.
+- correct: the claim states a fact consistent with a gold 'correct' fact — paraphrase allowed. If the claim adds a conjunct or detail beyond the gold wording, credit it ONLY when that added assertion is also true and consistent (same entities/figures/scope). Example: gold 'researcher registered the kill-switch domain' is matched by 'a 22-year-old UK researcher discovered the kill switch accidentally'.
+- incorrect: the claim contradicts a gold 'correct' fact (different figure/date/country/polarity for the same thing), matches a gold fact labeled 'incorrect', OR adds a conjunct that is demonstrably false (e.g. gold covers 'Sputnik launched in 1957' and the claim continues '...and the Moon is made of cheese' — the fused claim is not correct).
 - contested: the claim asserts a one-sided priority/disputed statement that a gold fact labels 'contested', or asserts a figure within a range a gold 'contested' fact describes as disputed. No credit either way.
 - off-topic: NO gold fact covers the claim's assertion (it may be true, or about a source, an adjacent topic, or a comparison). No credit and no penalty — off-topic claims are not scored by this benchmark; they neither help nor hurt.
 
@@ -94,12 +94,10 @@ def make_gold_judge(llm: BaseLLM) -> callable:
         label = raw.strip().lower()
         if label in ("correct", "incorrect", "contested", "off-topic"):
             return label
-        # Judge refused/format error: fall back to the lexical matcher so
-        # an outage never silently changes a score.
-        lexical = _lexical(statement, expected)
-        if lexical in ("correct", "incorrect", "contested"):
-            return lexical
-        return "off-topic" if lexical == "unmatched" else lexical
+        # Refusal / schema drift (valid JSON, missing or unknown label): raise
+        # so the driver's make_claim_judge counts this as a fallback instead of
+        # silently swapping in the lexical verdict without a record.
+        raise JudgeError(f"gold judge returned invalid label: {raw!r}")
 
     return judge
 

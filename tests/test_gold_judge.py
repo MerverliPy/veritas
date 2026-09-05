@@ -82,3 +82,14 @@ def test_judge_precision_integration():
     assert m["judge_counts"] == {"correct": 1}
     # lexical-only baseline for the same claim: nothing is placed on gold
     assert compute_query_metrics(ledger, gold)["precision_supported"] is None
+
+
+def test_invalid_label_counts_as_fallback():
+    """Valid JSON with an unknown label (refusal/schema drift) must be
+    counted as a fallback, not silently swapped to the lexical verdict."""
+    llm = FakeLLM({GOLD_JUDGE_SYSTEM: lambda _u: '{"label": "unsure", "reason": "refusal"}'})
+    cb, state = make_claim_judge(llm)
+    stmt = "EternalBlue was released publicly in April 2017 by the " \
+           "Shadow Brokers."
+    assert cb(stmt, GOLD["expected_claims"]) == "correct"   # lexical fallback
+    assert state["fallbacks"] == 1
