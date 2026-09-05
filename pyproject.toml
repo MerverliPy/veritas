@@ -1,0 +1,19 @@
+[project]
+name = "veritas"
+version = "0.1.0"
+description = "Accurate and reliable agent research team: multi-role pipeline (plan -> research -> claim -> verify -> cross-check -> synthesize) over web, local files, and codebases, with per-claim confidence and explicit uncertainty."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+veritas = "veritas.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["veritas*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
