@@ -46,7 +46,13 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--queries", default=str(REPO / "bench" / "queries.json"))
-    p.add_argument("--out", default=str(Path.cwd() / "out" / "bench"))
+    p.add_argument("--out", default=str(Path.cwd() / "out" / "bench"),
+                   help="parent dir; each invocation writes its own <run-id>/ "
+                        "subdir (scorecard + per-query ledgers + llm.log)")
+    p.add_argument("--run-id", default=None,
+                   help="label this invocation (arm/repeat). Default: "
+                        "<cc|nocc>-<timestamp> so paired/determinism arms "
+                        "never clobber each other's artifacts")
     p.add_argument("--ids", default=None,
                    help="comma list of query ids to run (default: all)")
     p.add_argument("--cap-usd", type=float, default=1.0,
@@ -63,7 +69,9 @@ def main() -> int:
         want = {s.strip() for s in args.ids.split(",")}
         queries = [q for q in queries if q["id"] in want]
 
-    out_root = Path(args.out)
+    arm = "nocc" if args.no_crosscheck else "cc"
+    run_id = args.run_id or f"{arm}-{datetime.datetime.now():%Y%m%d-%H%M%S}"
+    out_root = Path(args.out) / run_id
     out_root.mkdir(parents=True, exist_ok=True)
     gold_dir = REPO / "bench" / "gold"
     extra = ["--no-crosscheck"] if args.no_crosscheck else []
@@ -81,6 +89,8 @@ def main() -> int:
         qout = out_root / qid
         qout.mkdir(parents=True, exist_ok=True)
         llm_log = qout / "llm.log"
+        if llm_log.exists():
+            llm_log.unlink()  # fresh file: meter only this invocation
         env = dict(os.environ, VERITAS_LLM_LOG=str(llm_log))
         cmd = [sys.executable, "-m", "veritas.cli", "run", qtext,
                "--surfaces", "web", "--outdir", str(qout), "--quiet", *extra]
@@ -126,6 +136,7 @@ def main() -> int:
                  if e.get("metrics")], relevance_judgements=relevance)
 
     provenance = {
+        "run_id": run_id,
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "queries_revision": spec.get("revision", "?"),
         "query_ids": [q["id"] for q in queries],
@@ -144,7 +155,8 @@ def main() -> int:
                  "gates": agg}
     out_path = out_root / "scorecard.json"
     out_path.write_text(json.dumps(scorecard, indent=2, ensure_ascii=False))
-    print(f"\n[bench] scorecard: {out_path}")
+    print(f"[bench] run dir: {out_root}")
+    print(f"[bench] scorecard: {out_path}")
     print(f"[bench] cumulative est cost: ${total_usd:.4f} "
           f"(cap ${args.cap_usd:.2f}{' — CAPPED-PARTIAL' if capped else ''})")
     for gate, g in agg.items():

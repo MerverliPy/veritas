@@ -10,7 +10,10 @@ deepseek-chat backend (`.env`), and spend real money.
 - `score.py` — pure, unit-tested scoring (metrics + A1–A6 gates). Hermetic.
 - `run_benchmark.py` — orchestrator: runs each query through the real CLI,
   meters cost from `VERITAS_LLM_LOG`, enforces a per-run USD cap, writes
-  `out/bench/scorecard.json`.
+  `out/bench/<run-id>/scorecard.json`. Every invocation gets its own
+  `<run-id>/` subdir (default `cc|nocc-<timestamp>`, or pass `--run-id`) so
+  the paired/determinism arms never clobber each other's scorecard, ledgers,
+  or `llm.log` (and each arm's cost meters only its own traffic).
 
 ## Run a pilot
 
@@ -18,11 +21,11 @@ deepseek-chat backend (`.env`), and spend real money.
 # 1. curate: pick queries (bench/queries.json) and fill gold/<id>.json
 # 2. execute (mainline arm — cross-check on):
 python3 bench/run_benchmark.py --ids f1-wannacry,f2-sputnik --cap-usd 0.25
-# 3. read the scorecard:
-cat out/bench/scorecard.json
+# 3. read the scorecard (path printed; under out/bench/<run-id>/):
+cat out/bench/<run-id>/scorecard.json
 ```
 
-Outputs land in `out/bench/` which is gitignored (`out/`). Cost is an
+Outputs land under `out/bench/` which is gitignored (`out/`). Cost is an
 *estimate* (log chars × blended rate — constants in `score.py`); the driver
 stops after the query that crosses `--cap-usd` and marks the scorecard
 `capped-partial`.
@@ -32,8 +35,8 @@ stops after the query that crosses `--cap-usd` and marks the scorecard
 | Arm | Command | Feeds |
 |---|---|---|
 | Mainline (cross-check on) | `run_benchmark.py` (default) | A1–A3, A5, A6, A4 (contradiction fires) |
-| Paired (cross-check off) | `run_benchmark.py --no-crosscheck` on the same subset | A4 cross-check delta (compare scorecards) |
-| Determinism | run a query twice (any two invocations) | A6 flip rate (pass both ledgers via `score.flip_rate`) |
+| Paired (cross-check off) | `run_benchmark.py --no-crosscheck --run-id nocc-pilot` on the same subset | A4 cross-check delta (compare the two scorecards) |
+| Determinism | run a query twice with distinct `--run-id`s | A6 flip rate (pass both ledgers via `score.flip_rate`) |
 
 ## Boundaries
 

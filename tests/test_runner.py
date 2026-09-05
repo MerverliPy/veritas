@@ -24,6 +24,23 @@ def make_notes(tmp_path: Path) -> Path:
     return root
 
 
+def test_ledger_persists_conflict_pairs(tmp_path: Path):
+    """Regression: contradiction pairs live on Report.conflicts and must be
+    persisted in ledger.json (the benchmark's D-class metric reads them)."""
+    from veritas.llm import FakeLLM
+    from veritas.schema import Report
+
+    runner = Runner(llm=FakeLLM({}), outdir=tmp_path / "out")
+    pairs = [{"a": "Bell invented the telephone.",
+              "b": "Meucci invented the telephone.",
+              "resolved": False}]
+    report = Report(query="q", answer="a", claims=[], gaps=[],
+                    conflicts=pairs)
+    runner._write_artifacts(report)
+    ledger = json.loads((tmp_path / "out" / "ledger.json").read_text())
+    assert ledger["conflicts"] == pairs
+
+
 def test_full_mission_offline(tmp_path: Path):
     notes = make_notes(tmp_path)
     plan = json.dumps({"overview": "compare the two tools",
