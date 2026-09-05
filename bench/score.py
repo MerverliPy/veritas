@@ -129,6 +129,8 @@ def compute_query_metrics(ledger: dict, gold: dict | None) -> dict:
         "n_gaps": len(ledger.get("gaps", [])),
         "conflict_pairs": sum(1 for c in claims if c.get("conflicts")),
         "crosschecked": sum(1 for c in claims if c.get("crosschecked")),
+        "asserted_n": 0,          # claims the pipeline stands behind
+        "high_asserted_n": 0,     # asserted + confidence high (cross-check win)
         # default nulls
         "precision_supported": None, "precision_supported_n": 0,
         "recall_gold": None, "recall_gold_n": 0,
@@ -138,6 +140,10 @@ def compute_query_metrics(ledger: dict, gold: dict | None) -> dict:
         "fabrication_U": None,
         "contradiction_fires_D": None,
     }
+    asserted = [c for c in claims if c["verdict"] in ("supported", "partial")]
+    m["asserted_n"] = len(asserted)
+    m["high_asserted_n"] = sum(1 for c in asserted
+                                if c["confidence"] == "high")
     if gold is None or not claims:
         return m
 
@@ -150,9 +156,14 @@ def compute_query_metrics(ledger: dict, gold: dict | None) -> dict:
         m["precision_supported"] = correct / len(scored) if scored else None
         m["precision_supported_n"] = len(scored)
         gold_correct = [e for e in expected if e.get("gold_label") == "correct"]
-        covered = sum(1 for e in gold_correct
-                      if any(best_gold_match(c["statement"], [e])
-                             for c in claims))
+        # Recall counts only claims the pipeline stands behind: verification
+        # may have rejected (contradicted/unsupported) a gold-correct
+        # statement, and a rejected claim is not coverage.
+        def _asserted_match(e: dict) -> bool:
+            return any(best_gold_match(c["statement"], [e])
+                       for c in claims
+                       if c["verdict"] in ("supported", "partial"))
+        covered = sum(1 for e in gold_correct if _asserted_match(e))
         m["recall_gold"] = covered / len(gold_correct) if gold_correct else None
         m["recall_gold_n"] = len(gold_correct)
     if cls in ("F", "C", "D"):
@@ -228,10 +239,15 @@ def _median(values: list[float]) -> float | None:
 
 
 def gates(q_metrics: list[dict], *,
+          q_metrics_nocc: list[dict] | None = None,
           relevance_judgements: list[int] | None = None,
           flip_pairs: list[tuple[dict, dict]] | None = None) -> dict:
     """A1–A6 over the per-query metric list. Each gate:
-    {ok: bool|None (None = not applicable), value, detail}."""
+    {ok: bool|None (None = not applicable), value, detail}.
+
+    ``q_metrics`` is the mainline (cross-check on) arm; A4 additionally needs
+    ``q_metrics_nocc`` (the paired cross-check-off arm) and stays ``None``
+    without it — a mainline-only contradiction fire is not the A4 gate."""
     fc = [m for m in q_metrics if m.get("class") in ("F", "C")
           and m.get("precision_supported_n")]
     prec = (sum(m["precision_supported"] * m["precision_supported_n"]
@@ -248,6 +264,31 @@ def gates(q_metrics: list[dict], *,
 
     d = [m for m in q_metrics if m.get("class") == "D"]
     d_fire = (all(m["contradiction_fires_D"] for m in d) if d else None)
+
+    # A4 needs BOTH arms: contradiction fires on the mainline run AND the
+    # cross-check benefit delta (with vs without). No paired data -> None.
+    def _fc_prec(ms: list[dict]) -> float | None:
+        f = [m for m in ms if m.get("class") in ("F", "C")
+             and m.get("precision_supported_n")]
+        return (sum(m["precision_supported"] * m["precision_supported_n"]
+                    for m in f) / sum(m["precision_supported_n"] for m in f)
+                if f else None)
+
+    def _high_share(ms: list[dict]) -> float | None:
+        an = sum(m.get("asserted_n", 0) for m in ms)
+        hn = sum(m.get("high_asserted_n", 0) for m in ms)
+        return (hn / an) if an else None
+
+    prec_nocc = _fc_prec(q_metrics_nocc) if q_metrics_nocc is not None else None
+    hs_with = _high_share(q_metrics)
+    hs_nocc = _high_share(q_metrics_nocc) if q_metrics_nocc is not None else None
+    delta_ok = None
+    if q_metrics_nocc is not None and d and hs_with is not None \
+            and hs_nocc is not None:
+        delta_ok = (d_fire is True and prec_nocc is not None
+                    and prec is not None and prec >= prec_nocc
+                    and hs_with > hs_nocc)
+    a4_ok = None if q_metrics_nocc is None else delta_ok
 
     rel = {b: (sum(m["reliability"].get(b) * m["reliability"].get(f"{b}_n", 0)
                    for m in q_metrics
@@ -302,10 +343,13 @@ def gates(q_metrics: list[dict], *,
             "value": {"unsupported_share_U": u_share},
             "detail": "needs U queries with claims",
         },
-        "A4_contradiction_D": {
-            "ok": d_fire,
-            "value": {"all_D_fired": d_fire, "n_D": len(d)},
-            "detail": "paired-arm cross-check delta reported separately",
+        "A4_crosscheck_benefit": {
+            "ok": a4_ok,
+            "value": {"all_D_fired": d_fire, "n_D": len(d),
+                      "precision_with": prec, "precision_without": prec_nocc,
+                      "high_share_with": hs_with,
+                      "high_share_without": hs_nocc},
+            "detail": "needs the paired cross-check-off arm (q_metrics_nocc)",
         },
         "A5_relevance": {
             "ok": a5_ok,

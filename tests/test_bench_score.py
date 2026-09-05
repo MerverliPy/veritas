@@ -180,9 +180,34 @@ def _all_pass_query_metrics():
     return [f, u, d]
 
 
+def test_recall_excludes_rejected_claims():
+    """A gold-correct statement found but rejected by verification
+    (contradicted/unsupported) is not coverage — the pipeline did not
+    assert it."""
+    stmt = "The worm stopped after the kill switch domain was registered."
+    g = gold("F", [exp(stmt)])
+    rejected = ledger([claim(stmt, verdict="contradicted", confidence="low")])
+    m = compute_query_metrics(rejected, g)
+    assert m["recall_gold"] == 0.0
+    asserted = ledger([claim(stmt, verdict="supported", confidence="medium")])
+    assert compute_query_metrics(asserted, g)["recall_gold"] == 1.0
+    # partial (asserted-with-correction) also counts as coverage
+    partial = ledger([claim(stmt, verdict="partial", confidence="low")])
+    assert compute_query_metrics(partial, g)["recall_gold"] == 1.0
+
+
 def test_gates_all_pass():
     qm = _all_pass_query_metrics()
-    g = gates(qm, relevance_judgements=[1, 1, 1, 0],
+    # paired arm: same precision, zero high claims -> cross-check benefit
+    f_nocc_claims = [claim(f"Solid fact {i} is well documented.",
+                           confidence="medium") for i in range(11)]
+    f_nocc = compute_query_metrics(ledger(f_nocc_claims),
+                                   gold("F", [exp(f"Solid fact {i} "
+                                                   "is well documented.")
+                                               for i in range(11)]))
+    qm_nocc = [f_nocc, qm[1], qm[2]]
+    g = gates(qm, q_metrics_nocc=qm_nocc,
+              relevance_judgements=[1, 1, 1, 0],
               flip_pairs=[(ledger([claim("First stable claim statement here.",
                                           verdict="supported"),
                                    claim("Second stable claim statement here.",
@@ -194,13 +219,17 @@ def test_gates_all_pass():
     assert g["A1_precision_fabrication"]["ok"] is True   # precision 1.0, fab 0
     assert g["A2_calibration"]["ok"] is True             # 1.0 / 0.75 / 0.5
     assert g["A3_honest_failure_U"]["ok"] is True        # share 1.0
-    assert g["A4_contradiction_D"]["ok"] is True         # fires
+    assert g["A4_crosscheck_benefit"]["ok"] is True      # fires + delta
     assert g["A5_relevance"]["ok"] is True               # median 1.0
     assert g["A6_determinism"]["ok"] is True             # flip rate 0
     assert g["A1_precision_fabrication"]["value"]["precision_supported"] == 1.0
     rel = g["A2_calibration"]["value"]["reliability"]
     assert rel["high"] == 1.0 and abs(rel["medium"] - 0.75) < 1e-9 \
         and rel["low"] == 0.5
+    v4 = g["A4_crosscheck_benefit"]["value"]
+    assert v4["all_D_fired"] is True
+    assert v4["high_share_with"] > v4["high_share_without"]
+    assert v4["precision_with"] >= v4["precision_without"]
 
 
 def test_gates_detect_failures_and_na():
@@ -230,3 +259,6 @@ def test_gates_detect_failures_and_na():
     assert g4["A3_honest_failure_U"]["ok"] is None
     assert g4["A5_relevance"]["ok"] is None
     assert g4["A6_determinism"]["ok"] is None
+    # A4 without the paired arm is n/a, never PASS on a mainline fire alone
+    assert gates(_all_pass_query_metrics())["A4_crosscheck_benefit"]["ok"] \
+        is None

@@ -102,7 +102,16 @@ def main() -> int:
         total_usd += cost
 
         gold_path = gold_dir / f"{qid}.json"
-        gold = load_json(gold_path) if gold_path.exists() else None
+        gold = None
+        if gold_path.exists():
+            gold = load_json(gold_path)
+            if (gold.get("query_id") != qid
+                    or gold.get("class") != q.get("class")):
+                print(f"[bench] WARN gold/{qid}.json mismatch "
+                      f"(expected query_id={qid}, class={q.get('class')}; "
+                      f"got {gold.get('query_id')}/{gold.get('class')}) "
+                      f"— ignoring sheet")
+                gold = None
         entry: dict = {
             "id": qid,
             "class": q.get("class"),
@@ -132,8 +141,15 @@ def main() -> int:
     relevance = None
     if args.relevance:
         relevance = [int(v) for v in load_json(args.relevance)]
-    agg = gates([e["metrics"] for e in per_query
-                 if e.get("metrics")], relevance_judgements=relevance)
+    completed = [e for e in per_query if e.get("ok") and e.get("metrics")]
+    agg = gates([e["metrics"] for e in completed],
+                relevance_judgements=relevance)
+    n_failed = sum(1 for e in per_query if not e.get("ok")
+                   and not e.get("skipped_cap"))
+    n_skipped = sum(1 for e in per_query if e.get("skipped_cap"))
+    # Gates over a subset are advisory only: a failed/skipped mission must
+    # not let the rest silently pass as a complete benchmark.
+    valid = (not capped and n_failed == 0 and len(completed) == len(queries))
 
     provenance = {
         "run_id": run_id,
@@ -151,6 +167,9 @@ def main() -> int:
                      "see bench/score.py constants",
     }
     scorecard = {"provenance": provenance,
+                 "valid": valid,
+                 "n_failed": n_failed,
+                 "n_skipped_cap": n_skipped,
                  "queries": per_query,
                  "gates": agg}
     out_path = out_root / "scorecard.json"
@@ -159,6 +178,12 @@ def main() -> int:
     print(f"[bench] scorecard: {out_path}")
     print(f"[bench] cumulative est cost: ${total_usd:.4f} "
           f"(cap ${args.cap_usd:.2f}{' — CAPPED-PARTIAL' if capped else ''})")
+    if not valid:
+        print(f"[bench] scorecard INVALID ({n_failed} failed, "
+              f"{n_skipped} skipped, capped={capped}) — "
+              f"A1-A6 lines below are advisory only")
+    else:
+        print("[bench] scorecard VALID — A1-A6 lines below are authoritative")
     for gate, g in agg.items():
         ok = "PASS" if g["ok"] is True else ("FAIL" if g["ok"] is False else "n/a")
         print(f"  {gate}: {ok}  value={g['value']}")
