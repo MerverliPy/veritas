@@ -44,6 +44,22 @@ _VERDICTS = ("supported", "partial", "contradicted", "unsupported")
 CONFIDENCE_ORDER = ["high", "medium", "low", "unsupported"]
 CLASSES = ("F", "C", "D", "U")
 
+# Truth-critical disagreement: token overlap alone must never certify a
+# claim that contradicts gold on figures or polarity ("1958" vs "1957",
+# "did not launch" vs "launched"). These markers are 3 chars or digits and
+# would otherwise fall out of the significant-token set.
+_NEGATION = re.compile(
+    r"\b(?:not|no|never|without|nor|nothing|nobody|nowhere|neither|"
+    r"hardly|barely|unlikely)\b")
+
+
+def _numbers(text: str) -> tuple[str, ...]:
+    return tuple(sorted(set(re.findall(r"\d+", text))))
+
+
+def _negated(text: str) -> bool:
+    return bool(_NEGATION.search(text.lower()))
+
 
 def _sig_tokens(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9_]{4,}", text.lower()))
@@ -57,10 +73,22 @@ def _jaccard(a: str, b: str) -> float:
 
 
 def best_gold_match(statement: str, expected: list[dict]) -> dict | None:
-    """Highest-overlap gold expected claim, if above the match threshold."""
+    """Highest-overlap gold expected claim, if it is a genuine match.
+
+    Overlap must survive truth-critical checks: a claim that names
+    different figures ("in 1958" vs gold "in 1957") or has opposite
+    polarity ("did not launch" vs "launched") is a different claim and
+    never scores as the gold statement — regardless of token overlap."""
+    snum, sneg = _numbers(statement), _negated(statement)
     best, best_sim = None, 0.0
     for exp in expected:
-        sim = _jaccard(statement, exp["statement"])
+        st = exp["statement"]
+        enum, eneg = _numbers(st), _negated(st)
+        if snum and enum and snum != enum:
+            continue  # both cite figures and they differ
+        if sneg != eneg:
+            continue  # opposite polarity is a different claim
+        sim = _jaccard(statement, st)
         if sim > best_sim:
             best, best_sim = exp, sim
     return best if best_sim >= _MATCH_JACCARD else None

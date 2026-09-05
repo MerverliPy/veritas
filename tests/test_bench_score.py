@@ -336,3 +336,32 @@ def test_preflight_errors_detects_bad_gold_before_running(tmp_path):
     assert any("duplicate" in e for e in preflight_errors(dup, gold_dir))
     badcls = [{"id": "x1", "class": "Z", "query": "q"}]
     assert any("class" in e for e in preflight_errors(badcls, gold_dir))
+
+
+def test_gold_match_rejects_truth_critical_disagreement():
+    """Token overlap must never certify a claim that contradicts gold on
+    figures or polarity — the whole point of A1/A2 credit."""
+    from bench.score import best_gold_match
+    g1957 = [exp("Sputnik 1 was launched by the Soviet Union in 1957.")]
+    assert best_gold_match(
+        "Sputnik 1 was launched by the Soviet Union in 1958.", g1957) is None
+    assert gold_verdict("Sputnik 1 was launched by the Soviet Union in 1958.",
+                        g1957) != "correct"
+    # exact year still matches
+    assert gold_verdict("Sputnik 1 was launched by the Soviet Union in 1957.",
+                        g1957) == "correct"
+    g_launch = [exp("The Soviet Union launched Sputnik 1.")]
+    # polarity flip -> different claim, never credited
+    assert gold_verdict("The Soviet Union did not launch Sputnik 1.",
+                        g_launch) != "correct"
+    assert best_gold_match("The Soviet Union did not launch Sputnik 1.",
+                           g_launch) is None
+    # same polarity near-duplicate still matches (wording only)
+    assert best_gold_match("Sputnik 1 was put into orbit by the Soviet Union.",
+                           g_launch) is not None
+    # claims citing no figures are not blocked from matching figure-citing
+    # gold (only BOTH citing differing figures is blocked)
+    vague = [exp("The launch happened in 1957.")]
+    assert best_gold_match("The launch happened.", vague) is not None
+    # ...but weak overlap still does not match
+    assert best_gold_match("The launch occurred.", vague) is None
