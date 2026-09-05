@@ -173,8 +173,14 @@ class DeepSeekClient(BaseLLM):
         except OSError as e:
             # Never break a mission, but never stay silent either: a configured
             # audit trail that cannot be written is a lie the user must see.
-            print(f"[veritas] VERITAS_LLM_LOG write failed ({self.log}): {e}",
-                  file=sys.stderr, flush=True)
+            # Best-effort only — if even stderr is unusable (closed descriptor
+            # in a detached process, closed stream), give up quietly rather
+            # than raising through an otherwise successful call.
+            try:
+                print(f"[veritas] VERITAS_LLM_LOG write failed ({self.log}): {e}",
+                      file=sys.stderr, flush=True)
+            except (OSError, ValueError):
+                pass
 
     # -- interface ----------------------------------------------------------
     def complete(self, system, user, *, temperature=0.2, max_tokens=2048) -> str:

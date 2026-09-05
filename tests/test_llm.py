@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 from veritas.llm import DeepSeekClient
 
 
@@ -33,3 +35,18 @@ def test_audit_disabled_writes_nothing(tmp_path, capsys):
     _client("")._audit("sys", "user", "out")
     assert not list(tmp_path.iterdir())
     assert capsys.readouterr().err == ""
+
+
+def test_audit_failure_with_broken_stderr_never_raises(tmp_path, monkeypatch):
+    # A closed/unwritable stderr must not turn a surfaced warning into a raise:
+    # audit logging can never break a mission (review follow-up).
+    class _BrokenStderr:
+        def write(self, _text: str) -> int:
+            raise OSError("stderr closed")
+
+        def flush(self) -> None:
+            raise OSError("stderr closed")
+
+    monkeypatch.setattr(sys, "stderr", _BrokenStderr())
+    log = tmp_path / "missing" / "audit.log"
+    _client(str(log))._audit("sys", "user", "out")  # must not raise
