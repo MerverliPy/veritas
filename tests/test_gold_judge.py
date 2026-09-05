@@ -129,3 +129,35 @@ def test_outage_fallback_stays_in_precision_denominator():
     assert state["fallbacks"] == 1
     # sanity: the sentinel is what claim_judge returns on outage
     assert cb(fab, gold["expected_claims"]) == FALLBACK_UNMATCHED
+
+
+def test_outage_fallback_in_calibration_buckets():
+    """A high-confidence fabrication whose judge call fails must depress high
+    reliability, not vanish from the bucket."""
+    from bench.score import compute_query_metrics
+    gold = {"query_id": "q", "class": "F", "expected_claims": [
+        {"statement": "EternalBlue was released publicly in April 2017 by "
+                       "the Shadow Brokers.",
+         "gold_label": "correct", "confidence_class": "high"}]}
+    good = "EternalBlue was released publicly in April 2017 by the Shadow Brokers."
+    fab = "The Moon is made of cheese."
+    claims = [
+        {"id": "c1", "statement": good, "subquestion": "", "evidence": [],
+         "verdict": "supported", "confidence": "high", "crosschecked": True,
+         "conflicts": [], "note": ""},
+        {"id": "c2", "statement": fab, "subquestion": "", "evidence": [],
+         "verdict": "supported", "confidence": "high", "crosschecked": True,
+         "conflicts": [], "note": ""}]
+    ledger = {"query": "q", "created_at": "", "surfaces": ["web"],
+              "confidence_counts": {}, "claims": claims, "gaps": [],
+              "crosscheck": {}, "conflicts": []}
+
+    def respond(u):
+        claim = u.rsplit("CLAIM TO JUDGE:\n", 1)[-1].split("\n\n", 1)[0]
+        return '{"label": "correct", "reason": "t"}' if "Shadow Brokers" in claim \
+            else '{"label": "oops"}'
+    cb, _state = make_claim_judge(FakeLLM({GOLD_JUDGE_SYSTEM: respond}))
+    m = compute_query_metrics(ledger, gold, claim_judge=cb)
+    assert m["precision_supported"] == 0.5
+    assert m["reliability"]["high"] == 0.5    # 1 correct of 2 in the bucket
+    assert m["reliability"]["high_n"] == 2

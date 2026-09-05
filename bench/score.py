@@ -302,10 +302,12 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
         if claim_judge is not None:
             label = claim_judge(statement, expected, ledger.get("query"))
             if label == FALLBACK_UNMATCHED:
-                # Judge outage: the claim could not be placed. It is scored
-                # as not-correct (conservative) but is not judge output.
-                _label_cache[statement] = "unmatched_fallback"
-                return "unmatched_fallback"
+                # Judge outage: the claim could not be placed. Treat it as
+                # 'incorrect' everywhere (precision denominator AND the A2
+                # calibration buckets) — confidence placed in an unverifiable
+                # claim is a conservative calibration miss, never a credit.
+                _label_cache[statement] = "incorrect"
+                return "incorrect"
             m["judge_counts"][label] = m["judge_counts"].get(label, 0) + 1
             if label == "correct":
                 out = "correct"
@@ -330,8 +332,7 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
             # it cannot place (off-topic true context) are excluded and
             # reported, never scored wrong. Fabrication is caught by the
             # judge labeling demonstrably false claims 'incorrect'.
-            placed = sum(1 for l in labels
-                         if l in ("correct", "incorrect", "unmatched_fallback"))
+            placed = sum(1 for l in labels if l in ("correct", "incorrect"))
             m["precision_supported"] = correct / placed if placed else None
             m["precision_supported_n"] = placed
             m["precision_unscored_n"] = len(supported) - placed
