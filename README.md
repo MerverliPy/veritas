@@ -80,7 +80,7 @@ Confidence semantics:
 ## Development
 
 ```bash
-python3 -m pytest -q        # 48 hermetic tests, no network, FakeLLM-driven
+python3 -m pytest -q        # 52 hermetic tests, no network, FakeLLM-driven
 ```
 
 `veritas run "..." --fake` runs the full pipeline offline with scripted model

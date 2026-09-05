@@ -128,7 +128,11 @@ def hackernews(query: str, limit: int = 5) -> list[Evidence]:
 
 def github(query: str, limit: int = 5) -> list[Evidence]:
     out: list[Evidence] = []
-    url = ("https://api.github.com/search/repositories?q=" + urllib.parse.quote(query)
+    # the search API 422s on natural-language punctuation; send plain keywords
+    q = " ".join(re.findall(r"[a-z0-9]+", query.lower()))[:120]
+    if not q:
+        return out
+    url = ("https://api.github.com/search/repositories?q=" + urllib.parse.quote(q)
            + "&per_page=" + str(limit))
     data = _get_json(url, headers={"Accept": "application/vnd.github+json"})
     for repo in (data or {}).get("items", [])[:limit]:

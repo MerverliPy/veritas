@@ -131,6 +131,7 @@ class Runner:
 
         # ---- 5. independent cross-check
         cross_summary: dict = {}
+        primary_before_cross = len(verified)
         if self.enable_crosscheck:
             try:
                 xc_providers = _fresh_providers(query) if not self.providers else _copy_providers(self.providers)
@@ -141,8 +142,8 @@ class Runner:
                     evidence_limit=max(4, self.evidence_per_subquestion // 2),
                 )
                 self.log("cross-check: corroborated "
-                         f"{cross_summary.get('corroborated')} of "
-                         f"{len(verified)} primary claims, appended "
+                         f"{cross_summary.get('corroborated')} of {primary_before_cross} "
+                         "primary claims, appended "
                          f"{cross_summary.get('appended', 0)} candidate claim(s)")
             except Exception as e:
                 self.log(f"cross-check failed (continuing): {type(e).__name__}: {e}")

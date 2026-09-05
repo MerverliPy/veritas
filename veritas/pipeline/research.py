@@ -11,8 +11,31 @@ from __future__ import annotations
 
 from ..llm import BaseLLM
 from ..schema import Evidence, Plan, Query
+from ..extract import find_passages
 from .prompts import (CROSSCHECK_PLANNER_SYSTEM, PLANNER_SYSTEM,
                       RESEARCHER_SYSTEM, subquestions_from_plan_json)
+from ..connectors.files import tokenize
+
+
+def _fetched_passage(text: str, terms: list[str], cap: int = 2000) -> str:
+    """Prefer excerpts around the sub-question's terms over raw truncation:
+    fetches that start with navigation boilerplate otherwise bury the answer."""
+    if terms:
+        windows = find_passages(text, terms, width=420, cap=3)
+        if windows:
+            out = "\n\n[...]\n\n".join(windows)
+            if len(out) <= cap:
+                return out
+            # trim window list to fit cap
+            acc: list[str] = []
+            used = 0
+            for w in windows:
+                if used + len(w) + 8 > cap:
+                    break
+                acc.append(w)
+                used += len(w) + 8
+            return "\n\n[...]\n\n".join(acc)
+    return text[:cap]
 
 
 def make_plan(llm: BaseLLM, query: Query) -> Plan:
@@ -93,6 +116,7 @@ def research_subquestion(
     # Re-fetch full text of the strongest sources so claim extraction and
     # verification read the actual document, not just snippets.
     fetched: list[Evidence] = []
+    terms = tokenize(subquestion_text)
     for ev in evidence:
         if len(fetched) >= fetch_top:
             break
@@ -108,12 +132,17 @@ def research_subquestion(
         except Exception as e:
             warnings.append(f"fetch {ev.source.locator()}: {e}")
             text = None
-        if text:
-            fetched.append(Evidence(
-                source=ev.source,
-                passage=text[:1600] if ev.source.surface.value == "web" else text[:2400],
-                kind="fetch",
-            ))
+        if not text:
+            continue
+        if ev.source.surface.value == "web":
+            # skip near-empty pages that only carry navigation/title text
+            if len(text) < 400 and not find_passages(text, terms, cap=1):
+                warnings.append(f"near-empty page skipped: {ev.source.locator()}")
+                continue
+            passage = _fetched_passage(text, terms)
+        else:
+            passage = text[:2400]
+        fetched.append(Evidence(source=ev.source, passage=passage, kind="fetch"))
     if fetched:
         evidence = fetched + [e for e in evidence if e not in fetched]
     # dedupe by locator, preferring the longer (fetch) passage
