@@ -257,6 +257,9 @@ def main() -> int:
                     entry["error"] = f"score parse failed: {e}"
                 entry["judge_fallbacks"] = (
                     judge_state["fallbacks"] if judge_state else 0)
+                entry["judge_mode"] = (
+                    "judge" if judge_state else
+                    "lexical" if gold is not None else "no-gold")
                 if gold is None:
                     entry["note"] = "no gold sheet — structure-only metrics"
         log_text = llm_log.read_text(encoding="utf-8", errors="replace") \
@@ -306,6 +309,9 @@ def main() -> int:
         "queries_sha": hashlib.sha1(
             json.dumps(queries, sort_keys=True).encode()).hexdigest()[:12],
         "crosscheck": "off" if args.no_crosscheck else "on",
+        "gold_judge": ("off(--no-judge)" if args.no_judge
+                        else "off(no reasoning backend)" if not judge_enabled
+                        else "on"),
         "backend_note": "deepseek-chat (see bench/README.md)",
         "cap_usd": args.cap_usd,
         "capped_partial": capped,
