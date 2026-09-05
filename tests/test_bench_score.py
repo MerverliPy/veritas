@@ -497,3 +497,44 @@ def test_preflight_rejects_dangling_variant(tmp_path):
              "gold_label": "correct", "confidence_class": "high"}]}))
     errs = preflight_errors(queries, gold_dir)
     assert any("variant_of does not match" in e for e in errs)
+
+
+def test_spelled_out_quantity_disagreement_rejected():
+    """'three months' vs gold 'two months' must reject even though the
+    numbers are spelled out and digits drop out of token overlap."""
+    repo = Path(__file__).resolve().parents[1]
+    f1 = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
+    expected = f1["expected_claims"]
+    exact = "Microsoft released the MS17-010 security update in March 2017, " \
+            "about two months before the WannaCry outbreak."
+    assert gold_verdict(exact, expected) == "correct"
+    wrong = "Microsoft released the MS17-010 security update in March 2017, " \
+            "about three months before the WannaCry outbreak."
+    assert gold_verdict(wrong, expected) != "correct"
+
+
+def test_f1_split_origin_and_release_bases():
+    """NSA-origin and Shadow-Brokers-release are distinct base facts: a
+    release-only claim must not credit the NSA-origin fact, and each base
+    is covered by its own claim."""
+    repo = Path(__file__).resolve().parents[1]
+    f1 = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
+    expected = f1["expected_claims"]
+    assert gold_verdict("The Shadow Brokers released EternalBlue in April 2017.",
+                        expected) == "correct"
+    assert gold_verdict("EternalBlue was developed by the United States "
+                        "National Security Agency.", expected) == "correct"
+    g = gold("F", expected)
+    m = compute_query_metrics(ledger([
+        claim("The Shadow Brokers released EternalBlue in April 2017.",
+              verdict="supported")]), g)
+    assert m["recall_gold"] is not None and m["recall_gold"] < 1.0  # NSA fact uncovered
+    assert m["recall_gold_n"] >= 20  # every distinct canonical fact is a base
+
+
+def test_f1_positive_patch_delay_claim_matches():
+    repo = Path(__file__).resolve().parents[1]
+    f1 = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
+    expected = f1["expected_claims"]
+    assert gold_verdict("many organizations left the available MS17-010 patch "
+                        "unapplied", expected) == "correct"

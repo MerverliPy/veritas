@@ -11,17 +11,23 @@
       "note": "Core mechanism; independently corroborated."
     },
     {
-      "statement": "EternalBlue was developed by the United States National Security Agency and was released publicly in April 2017 by a group known as the Shadow Brokers.",
+      "statement": "EternalBlue was developed by the United States National Security Agency.",
       "gold_label": "correct",
       "confidence_class": "high",
-      "note": "NSA origin + Shadow Brokers leak; well documented."
+      "note": "NSA origin; independently documented."
     },
     {
       "statement": "The Shadow Brokers released EternalBlue in April 2017.",
-      "variant_of": "EternalBlue was developed by the United States National Security Agency and was released publicly in April 2017 by a group known as the Shadow Brokers.",
       "gold_label": "correct",
       "confidence_class": "high",
-      "note": "Alternate phrasing of the leak fact."
+      "note": "Public leak; its own base fact (not a variant of the NSA-origin claim)."
+    },
+    {
+      "statement": "EternalBlue was developed by the NSA and publicly released by the Shadow Brokers in April 2017.",
+      "variant_of": "EternalBlue was developed by the United States National Security Agency.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Compound phrasing credits the NSA-origin fact when the release fact is matched separately."
     },
     {
       "statement": "Microsoft released the MS17-010 security update in March 2017, about two months before the WannaCry outbreak.",
@@ -42,10 +48,16 @@
       "note": "Scale; widely reported estimates."
     },
     {
-      "statement": "WannaCry spread very fast because it was a self-propagating worm and because many organizations had not installed the available MS17-010 patch.",
+      "statement": "WannaCry spread very fast because it was a self-propagating worm.",
       "gold_label": "correct",
       "confidence_class": "high",
-      "note": "The 'why so fast' answer: worm behavior + slow patching."
+      "note": "The 'why so fast' answer, half one: worm self-propagation."
+    },
+    {
+      "statement": "Many organizations left the available MS17-010 patch unapplied.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "The 'why so fast' answer, half two: slow patching; positive phrasing."
     },
     {
       "statement": "WannaCry performed automatic network scanning to find vulnerable machines.",
@@ -57,7 +69,14 @@
       "statement": "WannaCry spread without requiring any user interaction.",
       "gold_label": "correct",
       "confidence_class": "high",
-      "note": "No-click worm property; encyclopedic."
+      "note": "No-click worm property; negation is intrinsic to the fact."
+    },
+    {
+      "statement": "WannaCry spread automatically from computer to computer after the first machine was infected.",
+      "variant_of": "WannaCry spread without requiring any user interaction.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Positive phrasing of the no-interaction fact so non-negated claims credit it."
     },
     {
       "statement": "The spread of WannaCry was halted after a researcher registered the worm's hardcoded kill-switch domain.",
@@ -120,10 +139,84 @@
       "note": "Modeling claim from technical writeups rather than a directly observable fact; low gold expectation."
     },
     {
-      "statement": "Widespread delays in applying the MS17-010 patch left hundreds of thousands of systems vulnerable to EternalBlue.",
+      "statement": "Widespread delays in applying the MS17-010 patch left very many systems vulnerable to EternalBlue.",
       "gold_label": "correct",
       "confidence_class": "medium",
-      "note": "Patching-driver scale claim."
+      "note": "Patching-driver scale claim; deliberately avoids vague scale words (hundreds/thousands) that the quantity matcher cannot compare reliably."
+    },
+    {
+      "statement": "EternalBlue is an exploit targeting MS17-010 (CVE-2017-0144), which involves flaws in the SMBv1 protocol.",
+      "variant_of": "EternalBlue is an exploit that targets MS17-010, which patches flaws in the Windows SMBv1 protocol.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Canonical-phrasing variant of the exploit fact (CVE id spelled out)."
+    },
+    {
+      "statement": "A large WannaCry ransomware campaign exploited an SMB vulnerability in Microsoft Windows beginning in May 2017.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Outbreak-campaign fact; audited against the public record."
+    },
+    {
+      "statement": "WannaCry exploited a Windows flaw that Microsoft had patched about two months earlier.",
+      "variant_of": "Microsoft released the MS17-010 security update in March 2017, about two months before the WannaCry outbreak.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Patch-timing fact phrased from the attacker side."
+    },
+    {
+      "statement": "EternalBlue is a leaked NSA exploit from 2017 that targets Microsoft's SMBv1 protocol.",
+      "variant_of": "EternalBlue was developed by the United States National Security Agency.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Leak-origin phrasing variant."
+    },
+    {
+      "statement": "Microsoft released the MS17-010 patch about a month before EternalBlue was publicly exposed.",
+      "variant_of": "Microsoft released the MS17-010 security update in March 2017, about two months before the WannaCry outbreak.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Relative timing to the leak, not the outbreak."
+    },
+    {
+      "statement": "The WannaCry attack used EternalBlue, an NSA-built exploit for Windows file-sharing.",
+      "variant_of": "The WannaCry ransomware worm spread in May 2017 by exploiting EternalBlue on unpatched Windows systems.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Attack-mechanism phrasing variant (file-sharing = SMB)."
+    },
+    {
+      "statement": "EternalBlue is identified as CVE-2017-0144, a critical remote code execution vulnerability in Microsoft's SMBv1 protocol.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "CVE-2017-0144 identity + critical RCE rating; MSRC-documented."
+    },
+    {
+      "statement": "The persistence of EternalBlue-driven attacks is driven by poor patching practices and reliance on legacy Windows systems.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Patching-practices driver fact."
+    },
+    {
+      "statement": "Microsoft's MS17-010 patch had been available since March 2017.",
+      "variant_of": "Microsoft released the MS17-010 security update in March 2017, about two months before the WannaCry outbreak.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Availability phrasing variant of the patch-timing fact."
+    },
+    {
+      "statement": "Microsoft released the MS17-010 patch about a month before EternalBlue was publicly exposed, but widespread delays in patch adoption left very many systems unpatched.",
+      "variant_of": "Widespread delays in applying the MS17-010 patch left very many systems vulnerable to EternalBlue.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Compound canonical phrasing variant of the patch-delay fact (avoids vague scale words)."
+    },
+    {
+      "statement": "Microsoft released the MS17-010 patch about a month before EternalBlue was publicly exposed, but widespread delays in patch adoption left hundreds of thousands of systems vulnerable.",
+      "variant_of": "Widespread delays in applying the MS17-010 patch left very many systems vulnerable to EternalBlue.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Canonical-phrasing variant of the patch-delay fact; scale words mirror the canonical wording so the quantity matcher compares like for like."
     }
   ]
 }

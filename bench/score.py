@@ -53,42 +53,71 @@ CLASSES = ("F", "C", "D", "U")
 # countries" vs gold "...150 countries in May 2017"; contradiction
 # rejected: 1958 vs 1957, 444 vs 445, 100,000/15 vs 200,000/150).
 _QUANTITY = re.compile(r"\d[\d,]*(?:\.\d+)?")
+# Spelled-out quantities participate in disagreement checks too: 'three
+# months' vs gold 'two months' must reject like 1958 vs 1957.
+_NUMWORD = {
+    "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+    "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+    "eleven": "11", "twelve": "12", "thirteen": "13", "fourteen": "14",
+    "fifteen": "15", "sixteen": "16", "seventeen": "17", "eighteen": "18",
+    "nineteen": "19", "twenty": "20", "thirty": "30", "forty": "40",
+    "fifty": "50", "sixty": "60", "seventy": "70", "eighty": "80",
+    "ninety": "90", "hundred": "100", "thousand": "1000",
+    "million": "1000000", "billion": "1000000000",
+    "hundreds": "100", "thousands": "1000", "millions": "1000000",
+    "billions": "1000000000",
+}
 _NEGATION = re.compile(
     r"\b(?:not|no|never|without|nor|nothing|nobody|nowhere|neither|"
     r"hardly|barely|unlikely)\b")
 
 
 def _quantities(text: str) -> set[str]:
-    return {q.replace(",", "") for q in _QUANTITY.findall(text)}
+    digits = {q.replace(",", "") for q in _QUANTITY.findall(text)}
+    words = {v for w, v in _NUMWORD.items()
+             if re.search(rf"\b{w}\b", text.lower())}
+    return digits | words
 
 
 def _quantity_anchors(text: str) -> dict[str, set[str]]:
-    """Map each quantity to the content word it modifies (the word that
-    follows it, else the word before). Role-aware: 'roughly 150 computers'
-    anchors 150 to 'computers', so a claim swapping 150 computers for
-    200,000 is caught even though {150, 2017} is a subset of gold's
-    {200000, 150, 2017}."""
-    words = [(m.group(0), m.start()) for m in re.finditer(r"[a-z]{3,}",
-                                                          text.lower())]
+    """Map each quantity (digit run or spelled number word) to the content
+    word it modifies — the following non-numeric word, else the preceding
+    one. Role-aware: 'roughly 150 computers' anchors 150 to 'computers', so
+    a claim swapping 150 computers for 200,000 is caught even though
+    {150, 2017} is a subset of gold's {200000, 150, 2017}; 'three months'
+    anchors 3 to 'months' and disagrees with gold's two months."""
+    words = [(m.group(0), m.start())
+             for m in re.finditer(r"[a-z]{3,}", text.lower())]
     anchors: dict[str, set[str]] = {}
-    for m in _QUANTITY.finditer(text):
-        val = m.group(0).replace(",", "")
-        following = next((w for w, pos in words if pos >= m.end()), None)
-        preceding = next((w for w, pos in reversed(words) if pos < m.start()),
-                         None)
-        anchor = following or preceding
+
+    def add(val: str, pos: int) -> None:
+        nxt = next((w for w, p in words
+                    if p > pos and w not in _NUMWORD), None)
+        prv = next((w for w, p in reversed(words)
+                    if p < pos and w not in _NUMWORD), None)
+        anchor = nxt or prv
         if anchor:
             anchors.setdefault(anchor, set()).add(val)
+
+    low = text.lower()
+    for w, v in _NUMWORD.items():
+        for m in re.finditer(rf"\b{w}\b", low):
+            add(v, m.start())
+    for m in _QUANTITY.finditer(text):
+        add(m.group(0).replace(",", ""), m.end())
     return anchors
 
 
 def _quantity_conflict(statement: str, gold: str) -> bool:
     """True when both statements quantify the SAME anchored thing with
-    different values (different year after 'in', different port after
-    'port', different count before 'computers')."""
+    values where neither side's value set contains the other's (different
+    year/port/count for the same anchor, e.g. 'in 1958' vs 'in 1957',
+    'port 444' vs 'port 445', '150 computers' vs '200,000 computers').
+    Subset additions are tolerated per anchor ('May 12, 2017' adds a day
+    to gold's 'May 2017' without contradicting it)."""
     sa, ga = _quantity_anchors(statement), _quantity_anchors(gold)
     for anchor in sa.keys() & ga.keys():
-        if sa[anchor] != ga[anchor]:
+        if not (sa[anchor] <= ga[anchor] or ga[anchor] <= sa[anchor]):
             return True
     return False
 
