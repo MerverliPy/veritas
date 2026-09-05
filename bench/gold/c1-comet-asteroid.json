@@ -1,0 +1,32 @@
+{
+  "query_id": "c1-comet-asteroid",
+  "class": "C",
+  "source_landscape": "Standard astronomy reference material (encyclopedic, stable): comets are ice-and-dust bodies that develop a coma and tails near the Sun; asteroids are rocky/metallic bodies, concentrated in the main belt; both are leftovers from Solar System formation.",
+  "note": "DRAFT 2026-09-05 — facts checked against web sources by agent. OWNER MUST AUDIT before pilot numbers are meaningful.",
+  "expected_claims": [
+    {
+      "statement": "Comets are composed largely of ice and dust and can develop a coma and tails as they approach the Sun, while asteroids are rocky or metallic bodies that do not.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "The canonical composition/behavior distinction."
+    },
+    {
+      "statement": "Both comets and asteroids are small bodies left over from the formation of the Solar System.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Shared origin; independently corroborated."
+    },
+    {
+      "statement": "Most asteroids orbit the Sun in the main asteroid belt between Mars and Jupiter.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Location claim; encyclopedic."
+    },
+    {
+      "statement": "Comets typically travel on more eccentric orbits than main-belt asteroids.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Orbital contrast; generally true, subtlety around scattered populations."
+    }
+  ]
+}

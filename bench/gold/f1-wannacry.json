@@ -1,0 +1,32 @@
+{
+  "query_id": "f1-wannacry",
+  "class": "F",
+  "source_landscape": "Well documented (Wikipedia 'WannaCry ransomware attack', security retrospectives, and the 2026-09-05 canonical run): outbreak May 2017; EternalBlue exploit of SMBv1 patched in MS17-010 (March 2017); self-propagating worm behavior; roughly 150 countries affected; hardcoded kill-switch domain registration halted the spread.",
+  "note": "DRAFT 2026-09-05 — facts checked against web sources by agent (Wikipedia WannaCry attack; MS17-010/EternalBlue retrospectives). Supersedes the earlier example sheet. OWNER MUST AUDIT before pilot numbers are meaningful.",
+  "expected_claims": [
+    {
+      "statement": "The WannaCry ransomware worm spread in May 2017 by exploiting EternalBlue, a Windows SMBv1 vulnerability patched by Microsoft in MS17-010.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Core mechanism; independently corroborated across sources."
+    },
+    {
+      "statement": "WannaCry affected computers in around 150 countries within days of its May 2017 outbreak.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Widely cited '150 countries' figure; magnitude claim."
+    },
+    {
+      "statement": "The rapid spread of WannaCry was halted after a researcher registered the worm's hardcoded kill-switch domain.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Kill-switch account; naming Marcus Hutchins optional."
+    },
+    {
+      "statement": "Systems that had installed the MS17-010 patch, released in March 2017, were not vulnerable to EternalBlue-based propagation.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Straightforward causal claim about patching."
+    }
+  ]
+}

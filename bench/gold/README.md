@@ -38,12 +38,18 @@ scores each mission ledger against the sheet at `bench/gold/<query_id>.json`
   used to sanity-check the pipeline's calibration, not to override it.
 - Write statements that a verifier would agree on: self-contained, with the
   key figures/entities spelled out. Token matching is conservative (4+ char
-  alphanumeric tokens, Jaccard ≥ 0.5) — near-duplicate statements still match.
+  alphanumeric tokens, Jaccard ≥ 0.5) and refuses matches that disagree on
+  figures or polarity — a statement is only `correct` when it genuinely says
+  the same thing as gold.
 - Every query in the executed set needs a sheet **before** its A1–A5 numbers
   are meaningful. The runner prints structure-only metrics without one.
+- `U` (hard/niche) sheets may legitimately contain a *verified anchor* claim
+  plus a landscape note saying the target figure is not publicly documented —
+  never invent the answer. The point of `U` is honest failure.
 
-## Worked example
+## Current sheets
 
-`example-wannacry.json` shows the shape for the canonical F query. Copy to
-`gold/f1-wannacry.json` and audit before relying on it — it is illustrative
-of the schema, not owner-verified gold.
+All six seed queries have **DRAFT (2026-09-05)** sheets: facts were checked
+against web sources by the drafting agent, but the owner must audit each
+before pilot numbers are treated as meaningful (edit the `note` field when
+audited). `f1-wannacry` supersedes the earlier illustrative example.

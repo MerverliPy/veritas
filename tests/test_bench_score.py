@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
-from bench.run_benchmark import parse_relevance, select_queries
+from bench.run_benchmark import parse_relevance, preflight_errors, select_queries
 from bench.score import (
     compute_query_metrics,
     est_cost_usd,
@@ -365,3 +368,19 @@ def test_gold_match_rejects_truth_critical_disagreement():
     assert best_gold_match("The launch happened.", vague) is not None
     # ...but weak overlap still does not match
     assert best_gold_match("The launch occurred.", vague) is None
+
+
+def test_real_seed_gold_sheets_pass_preflight():
+    """Every bench/gold/<id>.json in the repo must satisfy the driver's own
+    pre-flight validation against bench/queries.json — schema drift breaks the
+    benchmark silently otherwise."""
+    from bench.run_benchmark import preflight_errors
+    repo = Path(__file__).resolve().parents[1]
+    spec = json.loads((repo / "bench" / "queries.json").read_text())
+    queries = spec["queries"]
+    assert len(queries) == 6
+    for q in queries:
+        assert (repo / "bench" / "gold" / f"{q['id']}.json").exists(), \
+            f"seed query {q['id']} has no gold sheet"
+    errs = preflight_errors(queries, repo / "bench" / "gold")
+    assert errs == [], f"gold pre-flight errors: {errs}"

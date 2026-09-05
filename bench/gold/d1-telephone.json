@@ -1,0 +1,32 @@
+{
+  "query_id": "d1-telephone",
+  "class": "D",
+  "source_landscape": "Genuine historical dispute. Mainstream history credits Alexander Graham Bell (US patent granted 1876). Antonio Meucci's earlier experiments are honored by US House Resolution 269 (107th Congress, 2002), which expresses the sense of the House regarding his work but does not award invention credit. Sources therefore conflict on priority — a well-behaved report should present both sides and flag the dispute, not assert one-sided priority.",
+  "note": "DRAFT 2026-09-05 — facts checked against web sources by agent (congress.gov H.Res.269 text; Wikipedia). 'Contested' labels excluded from precision/calibration; the D-class gate checks the contradiction pass fires. OWNER MUST AUDIT before pilot numbers are meaningful.",
+  "expected_claims": [
+    {
+      "statement": "Alexander Graham Bell was granted a US patent for the telephone in 1876.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Patent fact, not priority verdict; independently documented."
+    },
+    {
+      "statement": "Antonio Meucci developed an early telephone prototype, and a 2002 US House resolution honors his work on the telephone.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Factual about H.Res.269 (107th Congress); does not claim invention credit."
+    },
+    {
+      "statement": "Antonio Meucci, and not Alexander Graham Bell, invented the telephone.",
+      "gold_label": "contested",
+      "confidence_class": "low",
+      "note": "Priority claim; genuinely disputed — never scored correct or incorrect."
+    },
+    {
+      "statement": "Alexander Graham Bell alone invented the telephone, with no contribution from Antonio Meucci.",
+      "gold_label": "contested",
+      "confidence_class": "low",
+      "note": "Absolute one-sided claim; disputed — never scored correct or incorrect."
+    }
+  ]
+}
