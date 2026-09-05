@@ -94,3 +94,14 @@ def test_judgements_action_requires_force_on_sample_change():
     assert judgements_action(s1, s1, True, False) == "preserve"
     assert judgements_action(s1, s2, True, False) == "abort"
     assert judgements_action(s1, s2, True, True) == "write"
+
+
+def test_relevance_binding_error(tmp_path):
+    from bench.run_benchmark import relevance_binding_error
+    sample = tmp_path / "relevance-sample.json"
+    sample.write_text(json.dumps([{"url": "a"}, {"url": "b"}]))
+    assert relevance_binding_error(2, sample) is None
+    assert "do not match" in relevance_binding_error(1, sample)
+    assert relevance_binding_error(2, tmp_path / "missing.json") is not None
+    (tmp_path / "bad.json").write_text("{nope")
+    assert relevance_binding_error(2, tmp_path / "bad.json") is not None

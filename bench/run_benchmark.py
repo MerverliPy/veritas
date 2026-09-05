@@ -162,6 +162,12 @@ def _rescore_main(run_dir: Path, queries: list[dict], gold_dir: Path,
     if not run_dir.is_dir():
         print(f"[bench] rescore: no such run dir: {run_dir}", file=sys.stderr)
         return 2
+    if relevance is not None:
+        err = relevance_binding_error(len(relevance), run_dir /
+                                      "relevance-sample.json")
+        if err:
+            print(f"[bench] rescore aborted: {err}", file=sys.stderr)
+            return 2
     per_query = []
     for q in queries:
         if q.get("_unresolved"):
@@ -210,6 +216,23 @@ def _rescore_main(run_dir: Path, queries: list[dict], gold_dir: Path,
         print(f"  {gate}: {ok}  value={g['value']}")
     return 0
 
+
+
+def relevance_binding_error(n_judgements: int, sample_path: Path) -> str | None:
+    """A5 judgements describe THIS run's relevance-sample.json, in its order
+    and length — a stray [1] must never make A5 pass on an unrelated run."""
+    if not sample_path.exists():
+        return (f"relevance judgements given but no relevance-sample.json in "
+                f"the run dir — collect one first (collect_relevance.py)")
+    try:
+        sample = json.loads(sample_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return f"run relevance-sample.json is unreadable: {sample_path}"
+    if len(sample) != n_judgements:
+        return (f"relevance judgements ({n_judgements}) do not match the "
+                f"run's {len(sample)}-source sample — collect/refill "
+                f"relevance-sample.json for this run")
+    return None
 
 
 def select_queries(queries: list[dict], ids: str) -> tuple[list[dict], list[str]]:
@@ -305,14 +328,29 @@ def main() -> int:
             nocc_orig = prov.get("crosscheck") == "off"
             orig_ids = prov.get("query_ids", [])
         if args.ids is None and orig_ids:
-            # The run's recorded query set is authoritative: any recorded id
-            # missing from the current spec makes the rescore unresolvable.
+            # The run's recorded query set is authoritative: a recorded id
+            # missing from the current spec, or whose query text/class has
+            # drifted, makes the rescore unresolvable — the old ledger would
+            # be scored against a definition that never ran it.
+            recorded = {e["id"]: e for e in
+                        load_json(orig_scorecard).get("queries", [])}
             by_id = {q["id"]: q for q in queries}
-            resolved = [by_id[i] for i in orig_ids if i in by_id]
-            missing = [i for i in orig_ids if i not in by_id]
-            for i in missing:
-                resolved.append({"id": i, "class": None, "query": "",
-                                 "_unresolved": True})
+            resolved = []
+            for i in orig_ids:
+                if i not in by_id:
+                    resolved.append({"id": i, "class": None, "query": "",
+                                     "_unresolved": True,
+                                     "_reason": "missing from queries spec"})
+                    continue
+                rec = recorded.get(i) or {}
+                if rec.get("query") and rec["query"] != by_id[i]["query"]:
+                    resolved.append({"id": i, "class": by_id[i].get("class"),
+                                     "query": by_id[i]["query"],
+                                     "_unresolved": True,
+                                     "_reason": "query text drifted since "
+                                               "the run"})
+                    continue
+                resolved.append(by_id[i])
             queries = resolved
         return _rescore_main(run_dir, queries, gold_dir, judge_enabled,
                              relevance, args.no_crosscheck or nocc_orig)

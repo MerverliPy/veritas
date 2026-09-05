@@ -156,12 +156,19 @@ def main() -> int:
         except json.JSONDecodeError:
             prev_sample = None
     prev_filled = False
+    malformed = False
     if judgements_out.exists():
         try:
             prev_filled = any(v is not None for v in json.loads(
                 judgements_out.read_text(encoding="utf-8")))
         except json.JSONDecodeError:
-            prev_filled = False
+            # Malformed content is NOT evidence the file is safe to reset.
+            malformed = True
+    if malformed and not args.force:
+        print(f"[collect] {judgements_out} is malformed JSON — refusing to "
+              f"reset it (fix the file or rerun with --force)",
+              file=sys.stderr)
+        return 1
     action = judgements_action(prev_sample, entries, prev_filled, args.force)
     if action == "abort":
         print(f"[collect] sample changed since {judgements_out} was filled "
