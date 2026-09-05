@@ -40,6 +40,7 @@ from bench.score import (  # noqa: E402
     compute_query_metrics,
     est_cost_usd,
     gates,
+    gold_verdict as _lexical_gold,
     load_json,
 )
 
@@ -154,6 +155,9 @@ def main() -> int:
                    help="stop after cumulative estimated cost passes this USD")
     p.add_argument("--no-crosscheck", action="store_true",
                    help="add --no-crosscheck to each mission (paired arm)")
+    p.add_argument("--no-judge", action="store_true",
+                   help="skip the LLM gold judge; use lexical gold matching "
+                        "(default: judge on when a reasoning backend exists)")
     p.add_argument("--relevance", default=None,
                    help="optional JSON file: list of 0/1 rubric judgements")
     args = p.parse_args()
@@ -176,6 +180,16 @@ def main() -> int:
     if errs:
         p.error("pre-flight validation failed:\n  " + "\n  ".join(errs))
 
+    # LLM gold judge (default on when a reasoning backend exists). The judge
+    # appends to the query's llm.log so judging cost stays inside the meter.
+    judge_enabled = False
+    if not args.no_judge:
+        try:
+            from veritas.config import settings as _settings
+            judge_enabled = _settings.has_reasoning_backend()
+        except Exception:  # noqa: BLE001 - settings import must not kill the run
+            judge_enabled = False
+
     arm = "nocc" if args.no_crosscheck else "cc"
     run_id = args.run_id or f"{arm}-{datetime.datetime.now():%Y%m%d-%H%M%S}"
     out_root = Path(args.out) / run_id
@@ -183,7 +197,8 @@ def main() -> int:
     extra = ["--no-crosscheck"] if args.no_crosscheck else []
 
     print(f"[bench] {len(queries)} query(s), cap ${args.cap_usd:.2f}, "
-          f"crosscheck={'off' if args.no_crosscheck else 'on'}")
+          f"crosscheck={'off' if args.no_crosscheck else 'on'}, "
+          f"gold_judge={'on' if judge_enabled else 'off'}")
     total_usd = 0.0
     per_query = []
     capped = False  # True only once a remaining query is actually skipped
@@ -203,32 +218,51 @@ def main() -> int:
         print(f"[bench] {qid} ({q.get('class')}): {qtext[:70]}...")
         proc = subprocess.run(cmd, env=env, capture_output=True, text=True,
                               cwd=str(REPO))  # run the checked-out code
-        log_text = llm_log.read_text(encoding="utf-8", errors="replace") \
-            if llm_log.exists() else ""
-        cost = est_cost_usd(log_text)
-        total_usd += cost
-
-        gold_path = gold_dir / f"{qid}.json"
-        gold = load_json(gold_path) if gold_path.exists() else None
         entry: dict = {
             "id": qid,
             "class": q.get("class"),
             "query": qtext,
             "ok": proc.returncode == 0,
-            "est_cost_usd": round(cost, 6),
+            "est_cost_usd": 0.0,
             "metrics": {},
         }
+        gold_path = gold_dir / f"{qid}.json"
+        gold = load_json(gold_path) if gold_path.exists() else None
+        claim_judge = None
+        judge_state = None
         if proc.returncode != 0:
             entry["error"] = (proc.stderr or proc.stdout)[-500:]
         else:
             try:
                 ledger = load_json(qout / "ledger.json")
-                entry["metrics"] = compute_query_metrics(ledger, gold)
             except Exception as e:  # noqa: BLE001 - never lose the mission record
                 entry["ok"] = False
-                entry["error"] = f"score parse failed: {e}"
-            if gold is None:
-                entry["note"] = "no gold sheet — structure-only metrics"
+                entry["error"] = f"ledger unreadable: {e}"
+            else:
+                if judge_enabled and gold:
+                    # Judge each claim against the gold facts (temp 0, same
+                    # backend); transport failures fall back to the lexical
+                    # matcher per claim and are counted.
+                    from bench.judge import make_claim_judge
+                    from veritas.llm import DeepSeekClient
+
+                    claim_judge, judge_state = make_claim_judge(
+                        DeepSeekClient(log=str(llm_log)))
+
+                try:
+                    entry["metrics"] = compute_query_metrics(
+                        ledger, gold, claim_judge=claim_judge)
+                except Exception as e:  # noqa: BLE001
+                    entry["ok"] = False
+                    entry["error"] = f"score parse failed: {e}"
+                entry["judge_fallbacks"] = (
+                    judge_state["fallbacks"] if judge_state else 0)
+                if gold is None:
+                    entry["note"] = "no gold sheet — structure-only metrics"
+        log_text = llm_log.read_text(encoding="utf-8", errors="replace") \
+            if llm_log.exists() else ""
+        entry["est_cost_usd"] = round(est_cost_usd(log_text), 6)
+        total_usd += entry["est_cost_usd"]
         per_query.append(entry)
 
         remaining = queries[idx + 1:]
@@ -238,7 +272,7 @@ def main() -> int:
                   f"(cumulative ${total_usd:.4f}) — skipping "
                   f"{len(remaining)} remaining (scorecard capped-partial)")
         else:
-            print(f"[bench]   est ${cost:.5f} "
+            print(f"[bench]   est ${entry['est_cost_usd']:.5f} "
                   f"(cumulative ${total_usd:.5f})")
 
     completed = [e for e in per_query if e.get("ok") and e.get("metrics")]

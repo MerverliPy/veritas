@@ -222,14 +222,17 @@ def query_class(gold: dict | None) -> str | None:
 # Metrics
 # --------------------------------------------------------------------------
 
-def reliability(claims: list[dict], gold: dict) -> dict[str, float | int]:
+def reliability(claims: list[dict], gold: dict,
+                label_fn=gold_verdict) -> dict[str, float | int]:
     """P(gold-correct | confidence=b) over claims with an unambiguous gold
-    label (correct/incorrect; contested excluded), verdict supported/partial."""
+    label (correct/incorrect; contested/off-topic excluded), verdict
+    supported/partial. ``label_fn`` maps a statement to its gold label
+    (lexical by default, LLM judge when injected)."""
     buckets = {b: [0, 0] for b in ("high", "medium", "low")}  # correct, total
     for c in claims:
         if c["verdict"] not in ("supported", "partial"):
             continue
-        gv = gold_verdict(c["statement"], gold["expected_claims"])
+        gv = label_fn(c["statement"])
         if gv not in ("correct", "incorrect"):
             continue
         b = c["confidence"]
@@ -244,9 +247,15 @@ def reliability(claims: list[dict], gold: dict) -> dict[str, float | int]:
     return out
 
 
-def compute_query_metrics(ledger: dict, gold: dict | None) -> dict:
+def compute_query_metrics(ledger: dict, gold: dict | None,
+                          claim_judge=None) -> dict:
     """Metrics for one query run (spec §5). Gold-less runs report structure
-    only; every *_n field is 0 and pass-relevant values are None."""
+    only; every *_n field is 0 and pass-relevant values are None.
+
+    ``claim_judge`` (optional) labels each claim against gold facts
+    (bench/judge.py) for precision/calibration — the lexical matcher cannot
+    credit the pipeline's generative claims. When absent, lexical
+    ``gold_verdict`` is used. Recall stays lexical in both cases."""
     claims = ledger.get("claims", [])
     cls = query_class(gold)
     m: dict = {
@@ -259,6 +268,7 @@ def compute_query_metrics(ledger: dict, gold: dict | None) -> dict:
         "crosschecked": sum(1 for c in claims if c.get("crosschecked")),
         "asserted_n": 0,          # claims the pipeline stands behind
         "high_asserted_n": 0,     # asserted + confidence high (cross-check win)
+        "judge_counts": {},       # judge label distribution when judging
         # default nulls
         "precision_supported": None, "precision_supported_n": 0,
         "recall_gold": None, "recall_gold_n": 0,
@@ -276,11 +286,35 @@ def compute_query_metrics(ledger: dict, gold: dict | None) -> dict:
         return m
 
     expected = gold.get("expected_claims", [])
+    _label_cache: dict[str, str] = {}
+
+    def claim_label(statement: str) -> str:
+        # Memoize: each claim is judged once even when several metrics
+        # (precision, calibration) consume the same label.
+        if statement in _label_cache:
+            return _label_cache[statement]
+        if claim_judge is not None:
+            label = claim_judge(statement, expected, ledger.get("query"))
+            m["judge_counts"][label] = m["judge_counts"].get(label, 0) + 1
+            if label == "correct":
+                out = "correct"
+            elif label == "incorrect":
+                out = "incorrect"
+            elif label == "contested":
+                out = "contested"
+            else:
+                out = "unmatched"  # off-topic / judge fallback
+        else:
+            out = gold_verdict(statement, expected)
+        _label_cache[statement] = out
+        return out
+
+    expected = gold.get("expected_claims", [])
     if cls in ("F", "C"):
         supported = [c for c in claims if c["verdict"] == "supported"]
         scored = [c for c in supported]
         correct = sum(1 for c in scored
-                      if gold_verdict(c["statement"], expected) == "correct")
+                      if claim_label(c["statement"]) == "correct")
         m["precision_supported"] = correct / len(scored) if scored else None
         m["precision_supported_n"] = len(scored)
         # Recall counts distinct base facts. A 'variant_of' entry is an
@@ -298,7 +332,7 @@ def compute_query_metrics(ledger: dict, gold: dict | None) -> dict:
         m["recall_gold"] = covered / len(bases) if bases else None
         m["recall_gold_n"] = len(bases)
     if cls in ("F", "C", "D"):
-        m["reliability"] = reliability(claims, gold)
+        m["reliability"] = reliability(claims, gold, claim_label)
     if cls == "U":
         asserted = claims
         low_or_un = [c for c in asserted
