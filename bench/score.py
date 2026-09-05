@@ -45,16 +45,20 @@ CONFIDENCE_ORDER = ["high", "medium", "low", "unsupported"]
 CLASSES = ("F", "C", "D", "U")
 
 # Truth-critical disagreement: token overlap alone must never certify a
-# claim that contradicts gold on figures or polarity ("1958" vs "1957",
+# claim that contradicts gold on years or polarity ("1958" vs "1957",
 # "did not launch" vs "launched"). These markers are 3 chars or digits and
-# would otherwise fall out of the significant-token set.
+# would otherwise fall out of the significant-token set. Counts (150
+# countries, 200,000 machines) are left to lexical overlap: a claim that
+# omits a gold figure ("affected 150 countries" vs gold "...150 countries
+# in May 2017") is not a contradiction and must still match.
+_YEAR = re.compile(r"\b(?:1[89]\d{2}|20\d{2})\b")
 _NEGATION = re.compile(
     r"\b(?:not|no|never|without|nor|nothing|nobody|nowhere|neither|"
     r"hardly|barely|unlikely)\b")
 
 
-def _numbers(text: str) -> tuple[str, ...]:
-    return tuple(sorted(set(re.findall(r"\d+", text))))
+def _years(text: str) -> tuple[str, ...]:
+    return tuple(sorted(set(_YEAR.findall(text))))
 
 
 def _negated(text: str) -> bool:
@@ -75,21 +79,26 @@ def _jaccard(a: str, b: str) -> float:
 def best_gold_match(statement: str, expected: list[dict]) -> dict | None:
     """Highest-overlap gold expected claim, if it is a genuine match.
 
-    Overlap must survive truth-critical checks: a claim that names
-    different figures ("in 1958" vs gold "in 1957") or has opposite
-    polarity ("did not launch" vs "launched") is a different claim and
-    never scores as the gold statement — regardless of token overlap."""
-    snum, sneg = _numbers(statement), _negated(statement)
+    Overlap must survive truth-critical checks: a claim that cites a
+    different year ("in 1958" vs gold "in 1957") or has opposite polarity
+    ("did not launch" vs "launched") is a different claim and never scores
+    as the gold statement. Ties in overlap resolve toward the less
+    credit-worthy label (contested/incorrect over correct) so ambiguity
+    never certifies credit."""
+    syears, sneg = _years(statement), _negated(statement)
     best, best_sim = None, 0.0
     for exp in expected:
         st = exp["statement"]
-        enum, eneg = _numbers(st), _negated(st)
-        if snum and enum and snum != enum:
-            continue  # both cite figures and they differ
+        eyears, eneg = _years(st), _negated(st)
+        if syears and eyears and syears != eyears:
+            continue  # both cite years and they differ
         if sneg != eneg:
             continue  # opposite polarity is a different claim
         sim = _jaccard(statement, st)
-        if sim > best_sim:
+        if sim > best_sim or (
+                sim == best_sim and sim > 0.0 and best is not None
+                and exp.get("gold_label") != "correct"
+                and best.get("gold_label") == "correct"):
             best, best_sim = exp, sim
     return best if best_sim >= _MATCH_JACCARD else None
 

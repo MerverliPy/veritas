@@ -343,7 +343,7 @@ def test_preflight_errors_detects_bad_gold_before_running(tmp_path):
 
 def test_gold_match_rejects_truth_critical_disagreement():
     """Token overlap must never certify a claim that contradicts gold on
-    figures or polarity — the whole point of A1/A2 credit."""
+    years or polarity — the whole point of A1/A2 credit."""
     from bench.score import best_gold_match
     g1957 = [exp("Sputnik 1 was launched by the Soviet Union in 1957.")]
     assert best_gold_match(
@@ -362,12 +362,15 @@ def test_gold_match_rejects_truth_critical_disagreement():
     # same polarity near-duplicate still matches (wording only)
     assert best_gold_match("Sputnik 1 was put into orbit by the Soviet Union.",
                            g_launch) is not None
-    # claims citing no figures are not blocked from matching figure-citing
-    # gold (only BOTH citing differing figures is blocked)
+    # a claim citing no year still matches year-citing gold (subset is not
+    # a contradiction — only BOTH citing differing years is blocked)
     vague = [exp("The launch happened in 1957.")]
     assert best_gold_match("The launch happened.", vague) is not None
-    # ...but weak overlap still does not match
-    assert best_gold_match("The launch occurred.", vague) is None
+    assert best_gold_match("The launch occurred.", vague) is None  # weak sim
+    # non-year counts omitted by the claim do not block a match
+    scale = [exp("WannaCry affected around 150 countries in May 2017.")]
+    assert best_gold_match("WannaCry affected around 150 countries.",
+                           scale) is not None
 
 
 def test_real_seed_gold_sheets_pass_preflight():
@@ -384,3 +387,35 @@ def test_real_seed_gold_sheets_pass_preflight():
             f"seed query {q['id']} has no gold sheet"
     errs = preflight_errors(queries, repo / "bench" / "gold")
     assert errs == [], f"gold pre-flight errors: {errs}"
+
+
+def test_priority_claim_never_certified_by_patent_fact():
+    """d1 regression: 'Bell invented the telephone' must resolve to a
+    contested entry, never gain correct credit by matching the patent fact."""
+    repo = Path(__file__).resolve().parents[1]
+    g = json.loads((repo / "bench" / "gold" / "d1-telephone.json").read_text())
+    expected = g["expected_claims"]
+    assert gold_verdict("Alexander Graham Bell invented the telephone.",
+                        expected) == "contested"
+    assert gold_verdict("Antonio Meucci invented the telephone, not Bell.",
+                        expected) == "contested"
+    # the neutral patent fact still matches when asserted verbatim-ish
+    assert gold_verdict("In 1876 the United States Patent Office granted "
+                        "Alexander Graham Bell a patent for the telephone.",
+                        expected) == "correct"
+
+
+def test_atomic_gold_matches_verifier_shaped_claims():
+    """c1 regression: atomic gold entries match ordinary single-fact claims."""
+    repo = Path(__file__).resolve().parents[1]
+    g = json.loads((repo / "bench" / "gold" / "c1-comet-asteroid.json").read_text())
+    expected = g["expected_claims"]
+    assert gold_verdict("Comets consist largely of ice and dust.",
+                        expected) == "correct"
+    assert gold_verdict("Asteroids are rocky or metallic bodies.",
+                        expected) == "correct"
+    assert gold_verdict("Comets grow tails as they approach the Sun.",
+                        expected) == "correct"
+    # synonym paraphrase without the gold's 'largely' still matches
+    assert gold_verdict("Comets consist of ice and dust.",
+                        expected) == "correct"

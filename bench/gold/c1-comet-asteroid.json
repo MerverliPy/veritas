@@ -2,13 +2,25 @@
   "query_id": "c1-comet-asteroid",
   "class": "C",
   "source_landscape": "Standard astronomy reference material (encyclopedic, stable): comets are ice-and-dust bodies that develop a coma and tails near the Sun; asteroids are rocky/metallic bodies, concentrated in the main belt; both are leftovers from Solar System formation.",
-  "note": "DRAFT 2026-09-05 — facts checked against web sources by agent. OWNER MUST AUDIT before pilot numbers are meaningful.",
+  "note": "DRAFT 2026-09-05 — facts checked against web sources by agent. Statements are deliberately atomic (one fact each) so ordinary verifier-shaped answers match; compound answers that fuse several facts may under-match and are best stated separately. OWNER MUST AUDIT before pilot numbers are meaningful.",
   "expected_claims": [
     {
-      "statement": "Comets are composed largely of ice and dust and can develop a coma and tails as they approach the Sun, while asteroids are rocky or metallic bodies that do not.",
+      "statement": "Comets consist largely of ice and dust.",
       "gold_label": "correct",
       "confidence_class": "high",
-      "note": "The canonical composition/behavior distinction."
+      "note": "Comet composition; independently corroborated."
+    },
+    {
+      "statement": "Asteroids are rocky or metallic bodies.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Asteroid composition; independently corroborated."
+    },
+    {
+      "statement": "Comets develop a coma and tails as they approach the Sun.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Comet behavior; encyclopedic."
     },
     {
       "statement": "Both comets and asteroids are small bodies left over from the formation of the Solar System.",
@@ -26,7 +38,7 @@
       "statement": "Comets typically travel on more eccentric orbits than main-belt asteroids.",
       "gold_label": "correct",
       "confidence_class": "medium",
-      "note": "Orbital contrast; generally true, subtlety around scattered populations."
+      "note": "Orbital contrast; generally true, with nuance around scattered populations."
     }
   ]
 }

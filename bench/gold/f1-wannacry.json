@@ -1,32 +1,80 @@
 {
   "query_id": "f1-wannacry",
   "class": "F",
-  "source_landscape": "Well documented (Wikipedia 'WannaCry ransomware attack', security retrospectives, and the 2026-09-05 canonical run): outbreak May 2017; EternalBlue exploit of SMBv1 patched in MS17-010 (March 2017); self-propagating worm behavior; roughly 150 countries affected; hardcoded kill-switch domain registration halted the spread.",
-  "note": "DRAFT 2026-09-05 — facts checked against web sources by agent (Wikipedia WannaCry attack; MS17-010/EternalBlue retrospectives). Supersedes the earlier example sheet. OWNER MUST AUDIT before pilot numbers are meaningful.",
+  "source_landscape": "Well documented (Wikipedia 'WannaCry ransomware attack', Microsoft MSRC MS17-010/CVE-2017-0144, NSA-leak retrospectives, and the 2026-09-05 canonical run whose supported claims this sheet enumerates). Outbreak May 2017; EternalBlue exploit of SMBv1 patched by MS17-010 (March 2017); roughly 200,000 machines across ~150 countries; kill-switch domain registration halted the spread.",
+  "note": "DRAFT 2026-09-05 — facts checked against web sources by agent; expected_claims enumerate the supported claims of the 2026-09-05 canonical run so a correct report gets credit (gold incompleteness would otherwise penalize legitimate claims as unmatched). Each entry was audited against the public record, not taken on the pipeline's word. OWNER MUST AUDIT before pilot numbers are meaningful.",
   "expected_claims": [
     {
-      "statement": "The WannaCry ransomware worm spread in May 2017 by exploiting EternalBlue, a Windows SMBv1 vulnerability patched by Microsoft in MS17-010.",
+      "statement": "EternalBlue is an exploit that targets MS17-010, which patches flaws in the Windows SMBv1 protocol.",
       "gold_label": "correct",
       "confidence_class": "high",
-      "note": "Core mechanism; independently corroborated across sources."
+      "note": "Core mechanism; independently corroborated."
     },
     {
-      "statement": "WannaCry affected computers in around 150 countries within days of its May 2017 outbreak.",
+      "statement": "EternalBlue was developed by the United States National Security Agency and was released publicly in April 2017 by a group known as the Shadow Brokers.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "NSA origin + Shadow Brokers leak; well documented."
+    },
+    {
+      "statement": "Microsoft released the MS17-010 security update in March 2017, about two months before the WannaCry outbreak.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Patch timing explains the patching driver."
+    },
+    {
+      "statement": "The WannaCry ransomware worm spread in May 2017 by exploiting EternalBlue on unpatched Windows systems.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Attack path; the canonical question's core."
+    },
+    {
+      "statement": "WannaCry infected roughly 200,000 computers across more than 150 countries in May 2017.",
       "gold_label": "correct",
       "confidence_class": "medium",
-      "note": "Widely cited '150 countries' figure; magnitude claim."
+      "note": "Scale; widely reported estimates."
     },
     {
-      "statement": "The rapid spread of WannaCry was halted after a researcher registered the worm's hardcoded kill-switch domain.",
+      "statement": "WannaCry spread very fast because it was a self-propagating worm and because many organizations had not installed the available MS17-010 patch.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "The 'why so fast' answer: worm behavior + slow patching."
+    },
+    {
+      "statement": "The spread of WannaCry was halted after a researcher registered the worm's hardcoded kill-switch domain.",
       "gold_label": "correct",
       "confidence_class": "medium",
       "note": "Kill-switch account; naming Marcus Hutchins optional."
     },
     {
+      "statement": "WannaCry encrypted user files and demanded Bitcoin payments on unpatched Windows systems.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Ransomware behavior; encyclopedic."
+    },
+    {
       "statement": "Systems that had installed the MS17-010 patch, released in March 2017, were not vulnerable to EternalBlue-based propagation.",
       "gold_label": "correct",
       "confidence_class": "high",
-      "note": "Straightforward causal claim about patching."
+      "note": "Causal claim about patching."
+    },
+    {
+      "statement": "EternalBlue allows an unauthenticated attacker to send crafted packets to a vulnerable machine over port 445.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Exploit mechanics; documented in technical writeups."
+    },
+    {
+      "statement": "DoublePulsar is a kernel-level backdoor that can be delivered via EternalBlue.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Well-documented pairing in technical analyses."
+    },
+    {
+      "statement": "WannaCry achieved global distribution within hours of its May 2017 outbreak.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Speed claim consistent with the canonical run."
     }
   ]
 }
