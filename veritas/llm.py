@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import threading
 import time
 import urllib.error
@@ -169,8 +170,17 @@ class DeepSeekClient(BaseLLM):
             with open(self.log, "a") as f:
                 f.write("=== system ===\n%s\n=== user ===\n%s\n=== out ===\n%s\n\n"
                         % (system, user, out))
-        except OSError:
-            pass  # logging must never break a mission
+        except OSError as e:
+            # Never break a mission, but never stay silent either: a configured
+            # audit trail that cannot be written is a lie the user must see.
+            # Best-effort only — if even stderr is unusable (closed descriptor
+            # in a detached process, closed stream), give up quietly rather
+            # than raising through an otherwise successful call.
+            try:
+                print(f"[veritas] VERITAS_LLM_LOG write failed ({self.log}): {e}",
+                      file=sys.stderr, flush=True)
+            except (OSError, ValueError):
+                pass
 
     # -- interface ----------------------------------------------------------
     def complete(self, system, user, *, temperature=0.2, max_tokens=2048) -> str:
