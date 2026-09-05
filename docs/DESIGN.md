@@ -5,6 +5,25 @@ accurate and reliable enough for an internal tool. The team is implemented as
 deterministic pipeline stages; the only non-determinism is the LLM behind each
 stage, and every stage's output contract is enforced in code.
 
+**Evidence lifecycle at a glance**
+
+```mermaid
+flowchart LR
+  Q[Query] --> P["Plan<br/>(sub-questions)"]
+  P --> R["Research<br/>(Evidence: source + verbatim passage, anchored)"]
+  R --> C["Claims<br/>(bind evidence by index)"]
+  C -.->|"un-cited → gap"| G[gap]
+  C --> V["Verify<br/>(re-fetch; judge supported / partial / contradicted / unsupported)"]
+  V -.-> X["Cross-check optional<br/>(different sources → high)"]
+  V --> D["Contradiction detection<br/>(semantic pairs)"]
+  X --> D
+  D --> S["Synthesize<br/>(verified claims only)"]
+  S --> O["report.md + ledger.json"]
+  G --> O
+  D -.->|conflicts| F[conflicts]
+  F --> O
+```
+
 ## Why deterministic roles instead of live agents?
 
 Live multi-agent systems are excellent at exploration but hard to make
@@ -126,4 +145,4 @@ dominant cost and is parallelised (4 workers) over claims.
 | antonym contradictions | dedicated semantic contradiction pass |
 | overclaiming ("all" vs "most") | verifier returns partial + corrected statement |
 | silent gaps | unsupported claims reported under *Not established* |
-| audit loss | `VERITAS_LLM_LOG` captures every prompt/response; ledger.json is permanent |
+| audit loss | `ledger.json` and `report.md` persist per run in the output directory; the default `./out` is gitignored, but custom `--outdir` locations are not — curate or track generated outputs deliberately; `VERITAS_LLM_LOG` captures prompts when set |
