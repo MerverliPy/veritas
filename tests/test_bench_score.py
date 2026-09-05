@@ -496,4 +496,4 @@ def test_preflight_rejects_dangling_variant(tmp_path):
             {"statement": "Base fact one holds.", "variant_of": "No such base.",
              "gold_label": "correct", "confidence_class": "high"}]}))
     errs = preflight_errors(queries, gold_dir)
-    assert any("variant_of" in e and "No such base" in e for e in errs)
+    assert any("variant_of does not match" in e for e in errs)
