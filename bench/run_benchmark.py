@@ -35,11 +35,68 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))  # allow running from anywhere
 
 from bench.score import (  # noqa: E402
+    CLASSES,
+    CONFIDENCE_ORDER,
     compute_query_metrics,
     est_cost_usd,
     gates,
     load_json,
 )
+
+
+_GOLD_LABELS = ("correct", "incorrect", "contested")
+
+
+def preflight_errors(queries: list[dict], gold_dir: Path) -> list[str]:
+    """Validate query list + every selected gold sheet BEFORE any paid mission
+    runs. A malformed sheet must fail loudly up front — failing mid-run after
+    spending money (and discarding earlier progress) is unacceptable."""
+    errs: list[str] = []
+    ids = [q.get("id") for q in queries]
+    dups = sorted({i for i in ids if ids.count(i) > 1})
+    for i in dups:
+        errs.append(f"queries.json: duplicate query id {i!r}")
+    for q in queries:
+        if not q.get("id") or not q.get("query"):
+            errs.append("queries.json: entry missing id or query text")
+        elif q.get("class") not in CLASSES:
+            errs.append(f"queries.json: {q.get('id')!r} has unknown class "
+                        f"{q.get('class')!r} (expected one of {CLASSES})")
+    for q in queries:
+        qid = q.get("id")
+        gpath = gold_dir / f"{qid}.json"
+        if not gpath.exists():
+            continue  # missing sheet = structure-only metrics, allowed
+        try:
+            g = load_json(gpath)
+        except Exception as e:  # noqa: BLE001 - report the filename
+            errs.append(f"gold/{qid}.json: unreadable JSON: {e}")
+            continue
+        if g.get("query_id") != qid:
+            errs.append(f"gold/{qid}.json: query_id {g.get('query_id')!r} "
+                        f"!= query id {qid!r}")
+        if g.get("class") != q.get("class"):
+            errs.append(f"gold/{qid}.json: class {g.get('class')!r} "
+                        f"!= query class {q.get('class')!r}")
+        expected = g.get("expected_claims")
+        if not isinstance(expected, list) or not expected:
+            errs.append(f"gold/{qid}.json: expected_claims must be a "
+                        f"non-empty list")
+            continue
+        for i, e in enumerate(expected):
+            stmt = e.get("statement") if isinstance(e, dict) else None
+            if not isinstance(stmt, str) or not stmt.strip():
+                errs.append(f"gold/{qid}.json: expected_claims[{i}] missing "
+                            f"statement")
+            if e.get("gold_label") not in _GOLD_LABELS:
+                errs.append(f"gold/{qid}.json: expected_claims[{i}] "
+                            f"gold_label {e.get('gold_label')!r} not in "
+                            f"{_GOLD_LABELS}")
+            if e.get("confidence_class") not in CONFIDENCE_ORDER:
+                errs.append(f"gold/{qid}.json: expected_claims[{i}] "
+                            f"confidence_class {e.get('confidence_class')!r} "
+                            f"not in {CONFIDENCE_ORDER}")
+    return errs
 
 
 def select_queries(queries: list[dict], ids: str) -> tuple[list[dict], list[str]]:
@@ -96,13 +153,22 @@ def main() -> int:
         queries, unknown = select_queries(queries, args.ids)
         if unknown:
             p.error(f"unknown query id(s): {', '.join(unknown)}")
-    relevance = parse_relevance(args.relevance) if args.relevance else None
+    relevance = None
+    if args.relevance:
+        try:
+            relevance = parse_relevance(args.relevance)
+        except ValueError as e:
+            p.error(str(e))
+
+    gold_dir = REPO / "bench" / "gold"
+    errs = preflight_errors(queries, gold_dir)
+    if errs:
+        p.error("pre-flight validation failed:\n  " + "\n  ".join(errs))
 
     arm = "nocc" if args.no_crosscheck else "cc"
     run_id = args.run_id or f"{arm}-{datetime.datetime.now():%Y%m%d-%H%M%S}"
     out_root = Path(args.out) / run_id
     out_root.mkdir(parents=True, exist_ok=True)
-    gold_dir = REPO / "bench" / "gold"
     extra = ["--no-crosscheck"] if args.no_crosscheck else []
 
     print(f"[bench] {len(queries)} query(s), cap ${args.cap_usd:.2f}, "
@@ -124,23 +190,15 @@ def main() -> int:
         cmd = [sys.executable, "-m", "veritas.cli", "run", qtext,
                "--surfaces", "web", "--outdir", str(qout), "--quiet", *extra]
         print(f"[bench] {qid} ({q.get('class')}): {qtext[:70]}...")
-        proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
+        proc = subprocess.run(cmd, env=env, capture_output=True, text=True,
+                              cwd=str(REPO))  # run the checked-out code
         log_text = llm_log.read_text(encoding="utf-8", errors="replace") \
             if llm_log.exists() else ""
         cost = est_cost_usd(log_text)
         total_usd += cost
 
         gold_path = gold_dir / f"{qid}.json"
-        gold = None
-        if gold_path.exists():
-            gold = load_json(gold_path)
-            if (gold.get("query_id") != qid
-                    or gold.get("class") != q.get("class")):
-                print(f"[bench] WARN gold/{qid}.json mismatch "
-                      f"(expected query_id={qid}, class={q.get('class')}; "
-                      f"got {gold.get('query_id')}/{gold.get('class')}) "
-                      f"— ignoring sheet")
-                gold = None
+        gold = load_json(gold_path) if gold_path.exists() else None
         entry: dict = {
             "id": qid,
             "class": q.get("class"),
@@ -152,8 +210,12 @@ def main() -> int:
         if proc.returncode != 0:
             entry["error"] = (proc.stderr or proc.stdout)[-500:]
         else:
-            ledger = load_json(qout / "ledger.json")
-            entry["metrics"] = compute_query_metrics(ledger, gold)
+            try:
+                ledger = load_json(qout / "ledger.json")
+                entry["metrics"] = compute_query_metrics(ledger, gold)
+            except Exception as e:  # noqa: BLE001 - never lose the mission record
+                entry["ok"] = False
+                entry["error"] = f"score parse failed: {e}"
             if gold is None:
                 entry["note"] = "no gold sheet — structure-only metrics"
         per_query.append(entry)

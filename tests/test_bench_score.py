@@ -296,3 +296,43 @@ def test_parse_relevance_accepts_binary_only(tmp_path):
     for bad in ([0, 2], [0, -1], [0, "1"], [1.5, 0], [True, 0], "0,1"):
         with pytest.raises(ValueError):
             parse_relevance(write(bad))
+
+
+def _gold_file(gold_dir, qid, cls="F", *, query_id=None, expected=None,
+               malformed=False):
+    g = {"query_id": query_id or qid, "class": cls,
+         "source_landscape": "t",
+         "expected_claims": expected or [{"statement": "Fact one is true.",
+                                          "gold_label": "correct",
+                                          "confidence_class": "medium"}]}
+    text = "not json{{{" if malformed else __import__("json").dumps(g)
+    (gold_dir / f"{qid}.json").write_text(text)
+
+
+def test_preflight_errors_detects_bad_gold_before_running(tmp_path):
+    gold_dir = tmp_path / "gold"
+    gold_dir.mkdir()
+    queries = [{"id": "f1", "class": "F", "query": "q1"},
+               {"id": "u1", "class": "U", "query": "q2"},
+               {"id": "d1", "class": "D", "query": "q3"}]
+    from bench.run_benchmark import preflight_errors
+    assert preflight_errors(queries, gold_dir) == []   # missing sheets allowed
+    _gold_file(gold_dir, "f1")                          # good sheet -> ok
+    assert preflight_errors(queries, gold_dir) == []
+    _gold_file(gold_dir, "u1", malformed=True)          # unreadable JSON
+    errs = preflight_errors(queries, gold_dir)
+    assert any("unreadable JSON" in e for e in errs)
+    _gold_file(gold_dir, "u1", query_id="other")        # id mismatch
+    errs = preflight_errors(queries, gold_dir)
+    assert any("query_id" in e for e in errs)
+    (gold_dir / "d1.json").write_text(__import__("json").dumps(
+        {"query_id": "d1", "class": "D", "expected_claims": [
+            {"statement": "", "gold_label": "correct",
+             "confidence_class": "medium"}]}))
+    errs = preflight_errors(queries, gold_dir)
+    assert any("statement" in e for e in errs)
+    # duplicate ids + bad class caught too
+    dup = [{"id": "f1", "class": "F", "query": "q"}] * 2
+    assert any("duplicate" in e for e in preflight_errors(dup, gold_dir))
+    badcls = [{"id": "x1", "class": "Z", "query": "q"}]
+    assert any("class" in e for e in preflight_errors(badcls, gold_dir))
