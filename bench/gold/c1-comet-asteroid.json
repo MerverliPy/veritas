@@ -1,0 +1,51 @@
+{
+  "query_id": "c1-comet-asteroid",
+  "class": "C",
+  "source_landscape": "Standard astronomy reference material (encyclopedic, stable): comets are ice-and-dust bodies that develop a coma and tails near the Sun; asteroids are rocky/metallic bodies, concentrated in the main belt; both are leftovers from Solar System formation.",
+  "note": "DRAFT 2026-09-05 — facts checked against web sources by agent. Statements are deliberately atomic (one fact each) so ordinary verifier-shaped answers match; compound answers that fuse several facts may under-match and are best stated separately. OWNER MUST AUDIT before pilot numbers are meaningful.",
+  "expected_claims": [
+    {
+      "statement": "Comets consist largely of ice and dust.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Comet composition; independently corroborated."
+    },
+    {
+      "statement": "Comets are icy bodies made of dust.",
+      "variant_of": "Comets consist largely of ice and dust.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Alternate phrasing of the composition base fact, so natural wording like this credits the same fact without inflating the recall denominator."
+    },
+    {
+      "statement": "Asteroids are rocky or metallic bodies.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Asteroid composition; independently corroborated."
+    },
+    {
+      "statement": "Comets develop a coma and tails as they approach the Sun.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Comet behavior; encyclopedic."
+    },
+    {
+      "statement": "Both comets and asteroids are small bodies left over from the formation of the Solar System.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Shared origin; independently corroborated."
+    },
+    {
+      "statement": "Most asteroids orbit the Sun in the main asteroid belt between Mars and Jupiter.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Location claim; encyclopedic."
+    },
+    {
+      "statement": "Comets typically travel on more eccentric orbits than main-belt asteroids.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Orbital contrast; generally true, with nuance around scattered populations."
+    }
+  ]
+}

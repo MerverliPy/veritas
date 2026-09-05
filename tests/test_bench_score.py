@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
-from bench.run_benchmark import parse_relevance, select_queries
+from bench.run_benchmark import parse_relevance, preflight_errors, select_queries
 from bench.score import (
     compute_query_metrics,
     est_cost_usd,
@@ -340,7 +343,7 @@ def test_preflight_errors_detects_bad_gold_before_running(tmp_path):
 
 def test_gold_match_rejects_truth_critical_disagreement():
     """Token overlap must never certify a claim that contradicts gold on
-    figures or polarity — the whole point of A1/A2 credit."""
+    quantities or polarity — the whole point of A1/A2 credit."""
     from bench.score import best_gold_match
     g1957 = [exp("Sputnik 1 was launched by the Soviet Union in 1957.")]
     assert best_gold_match(
@@ -359,9 +362,218 @@ def test_gold_match_rejects_truth_critical_disagreement():
     # same polarity near-duplicate still matches (wording only)
     assert best_gold_match("Sputnik 1 was put into orbit by the Soviet Union.",
                            g_launch) is not None
-    # claims citing no figures are not blocked from matching figure-citing
-    # gold (only BOTH citing differing figures is blocked)
+    # a claim citing no year still matches year-citing gold (subset is not
+    # a contradiction — only BOTH citing differing years is blocked)
     vague = [exp("The launch happened in 1957.")]
     assert best_gold_match("The launch happened.", vague) is not None
-    # ...but weak overlap still does not match
-    assert best_gold_match("The launch occurred.", vague) is None
+    assert best_gold_match("The launch occurred.", vague) is None  # weak sim
+    # non-year counts omitted by the claim do not block a match
+    scale = [exp("WannaCry affected around 150 countries in May 2017.")]
+    assert best_gold_match("WannaCry affected around 150 countries.",
+                           scale) is not None
+    # ...but explicitly DISAGREEING quantities never match (neither set
+    # contains the other), even though digits drop out of token overlap
+    port = [exp("EternalBlue sends crafted packets to a vulnerable machine "
+                "over port 445.")]
+    assert best_gold_match("EternalBlue sends crafted packets to a "
+                           "vulnerable machine over port 444.", port) is None
+    assert gold_verdict("EternalBlue sends crafted packets to a vulnerable "
+                        "machine over port 444.", port) != "correct"
+    big = [exp("WannaCry infected roughly 200,000 computers across more "
+               "than 150 countries in May 2017.")]
+    assert best_gold_match("WannaCry infected 100,000 computers across 15 "
+                           "countries.", big) is None
+
+
+def test_real_seed_gold_sheets_pass_preflight():
+    """Every bench/gold/<id>.json in the repo must satisfy the driver's own
+    pre-flight validation against bench/queries.json — schema drift breaks the
+    benchmark silently otherwise."""
+    from bench.run_benchmark import preflight_errors
+    repo = Path(__file__).resolve().parents[1]
+    spec = json.loads((repo / "bench" / "queries.json").read_text())
+    queries = spec["queries"]
+    assert len(queries) == 6
+    for q in queries:
+        assert (repo / "bench" / "gold" / f"{q['id']}.json").exists(), \
+            f"seed query {q['id']} has no gold sheet"
+    errs = preflight_errors(queries, repo / "bench" / "gold")
+    assert errs == [], f"gold pre-flight errors: {errs}"
+
+
+def test_priority_claim_never_certified_by_patent_fact():
+    """d1 regression: 'Bell invented the telephone' must resolve to a
+    contested entry, never gain correct credit by matching the patent fact."""
+    repo = Path(__file__).resolve().parents[1]
+    g = json.loads((repo / "bench" / "gold" / "d1-telephone.json").read_text())
+    expected = g["expected_claims"]
+    assert gold_verdict("Alexander Graham Bell invented the telephone.",
+                        expected) == "contested"
+    assert gold_verdict("Antonio Meucci invented the telephone, not Bell.",
+                        expected) == "contested"
+    # the neutral patent fact still matches when asserted verbatim-ish
+    assert gold_verdict("In 1876 the United States Patent Office granted "
+                        "Alexander Graham Bell a patent for the telephone.",
+                        expected) == "correct"
+
+
+def test_atomic_gold_matches_verifier_shaped_claims():
+    """c1 regression: atomic gold entries match ordinary single-fact claims."""
+    repo = Path(__file__).resolve().parents[1]
+    g = json.loads((repo / "bench" / "gold" / "c1-comet-asteroid.json").read_text())
+    expected = g["expected_claims"]
+    assert gold_verdict("Comets consist largely of ice and dust.",
+                        expected) == "correct"
+    assert gold_verdict("Asteroids are rocky or metallic bodies.",
+                        expected) == "correct"
+    assert gold_verdict("Comets grow tails as they approach the Sun.",
+                        expected) == "correct"
+    # synonym paraphrase without the gold's 'largely' still matches
+    assert gold_verdict("Comets consist of ice and dust.",
+                        expected) == "correct"
+    # phrasing-variant entry covers natural wording like Codex's example
+    assert gold_verdict("Comets are icy bodies made of dust.",
+                        expected) == "correct"
+
+
+def test_quantity_roles_never_swapped():
+    """Role-aware check: '150 computers' must not match gold's '200,000
+    computers' even though {150, 2017} is a subset of gold's quantities."""
+    repo = Path(__file__).resolve().parents[1]
+    g = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
+    expected = g["expected_claims"]
+    scale = "WannaCry infected roughly 200,000 computers across more than " \
+            "150 countries in May 2017."
+    assert gold_verdict(scale, expected) == "correct"          # exact scale
+    assert gold_verdict("WannaCry infected roughly 150 computers across "
+                        "more than 150 countries in May 2017.",
+                        expected) != "correct"                  # role swap
+    assert gold_verdict("WannaCry infected roughly 200,000 computers across "
+                        "more than 150 countries.",
+                        expected) == "correct"                  # omitted year ok
+
+
+def test_variant_does_not_inflate_recall():
+    repo = Path(__file__).resolve().parents[1]
+    c1 = json.loads((repo / "bench" / "gold" / "c1-comet-asteroid.json").read_text())
+    g = gold("C", c1["expected_claims"])
+    # one claim per distinct fact, composition stated in the VARIANT wording
+    stmts = ["Comets are icy bodies made of dust.",   # variant phrasing
+             "Asteroids are rocky or metallic bodies.",
+             "Comets develop a coma and tails as they approach the Sun.",
+             "Both comets and asteroids are leftovers from the formation "
+             "of the Solar System.",
+             "Most asteroids orbit the Sun in the main belt between Mars "
+             "and Jupiter.",
+             "Comets typically travel on more eccentric orbits than "
+             "main-belt asteroids."]
+    claims = [claim(s, verdict="supported", confidence="medium")
+              for s in stmts]
+    m = compute_query_metrics(ledger(claims), g)
+    assert m["recall_gold"] == 1.0, m   # 6 base facts, all covered
+    assert m["recall_gold_n"] == 6      # variant not a 7th denominator entry
+
+
+def test_f1_positive_patch_claim_matches_immune_paraphrase():
+    repo = Path(__file__).resolve().parents[1]
+    f1 = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
+    expected = f1["expected_claims"]
+    assert gold_verdict("Systems that had installed the MS17-010 patch, "
+                        "released in March 2017, were immune to "
+                        "EternalBlue-based propagation.", expected) == "correct"
+
+
+def test_preflight_rejects_dangling_variant(tmp_path):
+    from bench.run_benchmark import preflight_errors
+    gold_dir = tmp_path / "gold"
+    gold_dir.mkdir()
+    queries = [{"id": "f1", "class": "F", "query": "q"}]
+    (gold_dir / "f1.json").write_text(json.dumps({
+        "query_id": "f1", "class": "F",
+        "expected_claims": [
+            {"statement": "Base fact one is true.", "gold_label": "correct",
+             "confidence_class": "high"},
+            {"statement": "Base fact one holds.", "variant_of": "No such base.",
+             "gold_label": "correct", "confidence_class": "high"}]}))
+    errs = preflight_errors(queries, gold_dir)
+    assert any("variant_of does not match" in e for e in errs)
+
+
+def test_spelled_out_quantity_disagreement_rejected():
+    """'three months' vs gold 'two months' must reject even though the
+    numbers are spelled out and digits drop out of token overlap."""
+    repo = Path(__file__).resolve().parents[1]
+    f1 = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
+    expected = f1["expected_claims"]
+    exact = "Microsoft released the MS17-010 security update in March 2017, " \
+            "about two months before the WannaCry outbreak."
+    assert gold_verdict(exact, expected) == "correct"
+    wrong = "Microsoft released the MS17-010 security update in March 2017, " \
+            "about three months before the WannaCry outbreak."
+    assert gold_verdict(wrong, expected) != "correct"
+
+
+def test_f1_split_origin_and_release_bases():
+    """NSA-origin and Shadow-Brokers-release are distinct base facts: a
+    release-only claim must not credit the NSA-origin fact, and each base
+    is covered by its own claim."""
+    repo = Path(__file__).resolve().parents[1]
+    f1 = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
+    expected = f1["expected_claims"]
+    assert gold_verdict("The Shadow Brokers released EternalBlue in April 2017.",
+                        expected) == "correct"
+    assert gold_verdict("EternalBlue was developed by the United States "
+                        "National Security Agency.", expected) == "correct"
+    g = gold("F", expected)
+    m = compute_query_metrics(ledger([
+        claim("The Shadow Brokers released EternalBlue in April 2017.",
+              verdict="supported")]), g)
+    assert m["recall_gold"] is not None and m["recall_gold"] < 1.0  # NSA fact uncovered
+    assert m["recall_gold_n"] >= 20  # every distinct canonical fact is a base
+
+
+def test_f1_positive_patch_delay_claim_matches():
+    repo = Path(__file__).resolve().parents[1]
+    f1 = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
+    expected = f1["expected_claims"]
+    assert gold_verdict("many organizations left the available MS17-010 patch "
+                        "unapplied", expected) == "correct"
+
+
+def test_synonym_quantity_roles_never_swapped():
+    """'150 machines' vs gold '200,000 computers' must reject: anchor roles
+    are normalized (machines -> computers) before comparison."""
+    repo = Path(__file__).resolve().parents[1]
+    f1 = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
+    expected = f1["expected_claims"]
+    assert gold_verdict("WannaCry infected roughly 150 machines across more "
+                        "than 150 countries in May 2017.",
+                        expected) != "correct"
+    assert gold_verdict("WannaCry infected roughly 200,000 machines across "
+                        "more than 150 countries in May 2017.",
+                        expected) == "correct"
+
+
+def test_double_negation_never_certifies_opposite():
+    repo = Path(__file__).resolve().parents[1]
+    f1 = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
+    expected = f1["expected_claims"]
+    # 'did not spread without requiring' states the opposite of the no-click
+    # fact; two negation markers must not collapse to gold's single 'without'
+    assert gold_verdict("WannaCry did not spread without requiring any user "
+                        "interaction.", expected) != "correct"
+    assert gold_verdict("WannaCry spread without requiring any user "
+                        "interaction.", expected) == "correct"
+
+
+def test_conflicting_month_names_rejected():
+    repo = Path(__file__).resolve().parents[1]
+    f1 = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
+    expected = f1["expected_claims"]
+    gold_stmt = "The Shadow Brokers released EternalBlue in April 2017."
+    assert gold_verdict(gold_stmt, expected) == "correct"
+    assert gold_verdict("The Shadow Brokers released EternalBlue in May 2017.",
+                        expected) != "correct"
+    # omitting the month entirely still matches
+    assert gold_verdict("The Shadow Brokers released EternalBlue in 2017.",
+                        expected) == "correct"

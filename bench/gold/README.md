@@ -37,13 +37,42 @@ scores each mission ledger against the sheet at `bench/gold/<query_id>.json`
   single-source-but-solid fact is `medium` until cross-check corroborates) —
   used to sanity-check the pipeline's calibration, not to override it.
 - Write statements that a verifier would agree on: self-contained, with the
-  key figures/entities spelled out. Token matching is conservative (4+ char
-  alphanumeric tokens, Jaccard ≥ 0.5) — near-duplicate statements still match.
+  key figures/entities spelled out. Matching is conservative (4+ char
+  alphanumeric tokens, Jaccard ≥ 0.5) and refuses matches that disagree on
+  **years** or **polarity** ("did not launch" vs "launched") — a statement
+  is only `correct` when it genuinely says the same thing as gold.
+- **Atomicity**: state one fact per `expected_claim`. The pipeline emits
+  atomic verifier-shaped claims; a fused sentence ("comets are ice and dust
+  while asteroids are rocky") matches any single atomic entry poorly.
+- **Granularity**: phrase gold at the query's requested level. Do not put
+  unrequested specifics in a gold statement ("...in 1957" vs gold "...on
+  4 October 1957") — a correct answer at the asked granularity would be
+  blocked by the year/polarity checks and denied credit.
+- **Completeness**: enumerate the claims a *correct* report would assert
+  (the canonical run's supported claims are a good checklist). Gold
+  incompleteness penalizes legitimate claims as unmatched.
+- **Positive phrasing**: state facts positively. A gold entry containing a
+  negation word ("was not vulnerable") flips the polarity check, so an
+  equivalent positive claim ("were immune") would be rejected — phrase
+  immunity/protection facts as "protected from ..." instead.
+- **Variants**: when a natural alternate wording of a *central* fact would
+  fall under the Jaccard bar, add it as a second entry with
+  `"variant_of": "<exact base statement>"`. A variant credits the same
+  fact when matched but never adds to the recall denominator.
+- **Ambiguity order**: when two gold entries could tie for a claim, the
+  scorer resolves ties toward the less credit-worthy label
+  (contested/incorrect over correct); word entries so one-sided priority
+  claims cannot token-match a neutral fact entry (e.g. a patent statement
+  names the patent office and "granted a patent").
 - Every query in the executed set needs a sheet **before** its A1–A5 numbers
   are meaningful. The runner prints structure-only metrics without one.
+- `U` (hard/niche) sheets may legitimately contain a *verified anchor* claim
+  plus a landscape note saying the target figure is not publicly documented —
+  never invent the answer. The point of `U` is honest failure.
 
-## Worked example
+## Current sheets
 
-`example-wannacry.json` shows the shape for the canonical F query. Copy to
-`gold/f1-wannacry.json` and audit before relying on it — it is illustrative
-of the schema, not owner-verified gold.
+All six seed queries have **DRAFT (2026-09-05)** sheets: facts were checked
+against web sources by the drafting agent, but the owner must audit each
+before pilot numbers are treated as meaningful (edit the `note` field when
+audited). `f1-wannacry` supersedes the earlier illustrative example.

@@ -45,20 +45,112 @@ CONFIDENCE_ORDER = ["high", "medium", "low", "unsupported"]
 CLASSES = ("F", "C", "D", "U")
 
 # Truth-critical disagreement: token overlap alone must never certify a
-# claim that contradicts gold on figures or polarity ("1958" vs "1957",
-# "did not launch" vs "launched"). These markers are 3 chars or digits and
-# would otherwise fall out of the significant-token set.
+# claim that contradicts gold on quantities or polarity ("in 1958" vs
+# "1957", "port 444" vs "445", "did not launch" vs "launched"). Digits
+# fall out of the significant-token set, so quantities are compared
+# explicitly: a match is allowed only when either side cites none or one
+# side's quantity set contains the other's (omission tolerated: "150
+# countries" vs gold "...150 countries in May 2017"; contradiction
+# rejected: 1958 vs 1957, 444 vs 445, 100,000/15 vs 200,000/150).
+_QUANTITY = re.compile(r"\d[\d,]*(?:\.\d+)?")
+# Spelled-out quantities participate in disagreement checks too: 'three
+# months' vs gold 'two months' must reject like 1958 vs 1957. Named months
+# become month numbers so 'May 2017' vs gold 'April 2017' conflicts while
+# a claim that omits the month still matches.
+_NUMWORD = {
+    "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+    "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+    "eleven": "11", "twelve": "12", "thirteen": "13", "fourteen": "14",
+    "fifteen": "15", "sixteen": "16", "seventeen": "17", "eighteen": "18",
+    "nineteen": "19", "twenty": "20", "thirty": "30", "forty": "40",
+    "fifty": "50", "sixty": "60", "seventy": "70", "eighty": "80",
+    "ninety": "90", "hundred": "100", "thousand": "1000",
+    "million": "1000000", "billion": "1000000000",
+    "hundreds": "100", "thousands": "1000", "millions": "1000000",
+    "billions": "1000000000",
+    "january": "1", "february": "2", "march": "3", "april": "4",
+    "may": "5", "june": "6", "july": "7", "august": "8",
+    "september": "9", "october": "10", "november": "11",
+    "december": "12", "jan": "1", "feb": "2", "mar": "3",
+    "apr": "4", "jun": "6", "jul": "7", "aug": "8", "sep": "9",
+    "oct": "10", "nov": "11", "dec": "12",
+}
+# Synonym roles: quantity anchors are normalized so 'machines' vs gold
+# 'computers' (or 'hosts'/'devices'/'systems') compare the same role.
+_ANCHOR_ROLES = {
+    "computer": "computers", "computers": "computers",
+    "machine": "computers", "machines": "computers",
+    "device": "computers", "devices": "computers",
+    "host": "computers", "hosts": "computers",
+    "system": "computers", "systems": "computers",
+    "pc": "computers", "pcs": "computers", "node": "computers",
+    "nodes": "computers",
+    "country": "countries", "countries": "countries",
+    "nation": "countries", "nations": "countries",
+}
 _NEGATION = re.compile(
     r"\b(?:not|no|never|without|nor|nothing|nobody|nowhere|neither|"
     r"hardly|barely|unlikely)\b")
 
 
-def _numbers(text: str) -> tuple[str, ...]:
-    return tuple(sorted(set(re.findall(r"\d+", text))))
+def _negation_count(text: str) -> int:
+    """Number of negation markers. Double negation ('did not spread without
+    requiring...') must not collapse to the same polarity as a single 'without'."""
+    return len(_NEGATION.findall(text.lower()))
 
 
-def _negated(text: str) -> bool:
-    return bool(_NEGATION.search(text.lower()))
+def _quantities(text: str) -> set[str]:
+    digits = {q.replace(",", "") for q in _QUANTITY.findall(text)}
+    words = {v for w, v in _NUMWORD.items()
+             if re.search(rf"\b{w}\b", text.lower())}
+    return digits | words
+
+
+def _quantity_anchors(text: str) -> dict[str, set[str]]:
+    """Map each quantity (digit run or spelled number/month word) to the role
+    of the content word it modifies — the following non-numeric word, else
+    the preceding one — with synonym roles normalized (machines ==
+    computers). Role-aware: 'roughly 150 computers' anchors 150 to
+    'computers', so a claim swapping 150 machines for 200,000 computers is
+    caught even though {150, 2017} is a subset of gold's
+    {200000, 150, 2017}."""
+    words = [(m.group(0), m.start())
+             for m in re.finditer(r"[a-z]{3,}", text.lower())]
+    anchors: dict[str, set[str]] = {}
+
+    def role(w: str) -> str:
+        return _ANCHOR_ROLES.get(w, w)
+
+    def add(val: str, pos: int) -> None:
+        nxt = next((w for w, p in words
+                    if p > pos and w not in _NUMWORD), None)
+        prv = next((w for w, p in reversed(words)
+                    if p < pos and w not in _NUMWORD), None)
+        anchor = nxt or prv
+        if anchor:
+            anchors.setdefault(role(anchor), set()).add(val)
+
+    low = text.lower()
+    for w, v in _NUMWORD.items():
+        for m in re.finditer(rf"\b{w}\b", low):
+            add(v, m.start())
+    for m in _QUANTITY.finditer(text):
+        add(m.group(0).replace(",", ""), m.end())
+    return anchors
+
+
+def _quantity_conflict(statement: str, gold: str) -> bool:
+    """True when both statements quantify the SAME anchored thing with
+    values where neither side's value set contains the other's (different
+    year/port/count for the same anchor, e.g. 'in 1958' vs 'in 1957',
+    'port 444' vs 'port 445', '150 computers' vs '200,000 computers').
+    Subset additions are tolerated per anchor ('May 12, 2017' adds a day
+    to gold's 'May 2017' without contradicting it)."""
+    sa, ga = _quantity_anchors(statement), _quantity_anchors(gold)
+    for anchor in sa.keys() & ga.keys():
+        if not (sa[anchor] <= ga[anchor] or ga[anchor] <= sa[anchor]):
+            return True
+    return False
 
 
 def _sig_tokens(text: str) -> set[str]:
@@ -75,21 +167,29 @@ def _jaccard(a: str, b: str) -> float:
 def best_gold_match(statement: str, expected: list[dict]) -> dict | None:
     """Highest-overlap gold expected claim, if it is a genuine match.
 
-    Overlap must survive truth-critical checks: a claim that names
-    different figures ("in 1958" vs gold "in 1957") or has opposite
-    polarity ("did not launch" vs "launched") is a different claim and
-    never scores as the gold statement — regardless of token overlap."""
-    snum, sneg = _numbers(statement), _negated(statement)
+    Overlap must survive truth-critical checks: a claim that contradicts
+    gold on a quantity (different year, port, or count for the same thing)
+    or has opposite polarity ("did not launch" vs "launched") is a
+    different claim and never scores as the gold statement — while a claim
+    that merely omits a gold detail still matches. Ties in overlap resolve
+    toward the less credit-worthy label (contested/incorrect over correct)
+    so ambiguity never certifies credit."""
+    sq, sneg = _quantities(statement), _negation_count(statement)
     best, best_sim = None, 0.0
     for exp in expected:
         st = exp["statement"]
-        enum, eneg = _numbers(st), _negated(st)
-        if snum and enum and snum != enum:
-            continue  # both cite figures and they differ
+        eq, eneg = _quantities(st), _negation_count(st)
+        if sq and eq and not (sq <= eq or eq <= sq):
+            continue  # disjoint quantity sets: explicit disagreement
+        if _quantity_conflict(statement, st):
+            continue  # same anchored quantity, different value
         if sneg != eneg:
-            continue  # opposite polarity is a different claim
+            continue  # different negation scope/count is a different claim
         sim = _jaccard(statement, st)
-        if sim > best_sim:
+        if sim > best_sim or (
+                sim == best_sim and sim > 0.0 and best is not None
+                and exp.get("gold_label") != "correct"
+                and best.get("gold_label") == "correct"):
             best, best_sim = exp, sim
     return best if best_sim >= _MATCH_JACCARD else None
 
@@ -183,17 +283,20 @@ def compute_query_metrics(ledger: dict, gold: dict | None) -> dict:
                       if gold_verdict(c["statement"], expected) == "correct")
         m["precision_supported"] = correct / len(scored) if scored else None
         m["precision_supported_n"] = len(scored)
-        gold_correct = [e for e in expected if e.get("gold_label") == "correct"]
-        # Recall counts only claims the pipeline stands behind: verification
-        # may have rejected (contradicted/unsupported) a gold-correct
-        # statement, and a rejected claim is not coverage.
-        def _asserted_match(e: dict) -> bool:
-            return any(best_gold_match(c["statement"], [e])
+        # Recall counts distinct base facts. A 'variant_of' entry is an
+        # alternate phrasing of a base fact, not a second required fact — it
+        # would otherwise inflate the recall denominator.
+        bases = [e for e in expected
+                 if e.get("gold_label") == "correct" and not e.get("variant_of")]
+        def _covered(base: dict) -> bool:
+            cands = [base] + [v for v in expected
+                              if v.get("variant_of") == base["statement"]]
+            return any(best_gold_match(c["statement"], cands) is not None
                        for c in claims
                        if c["verdict"] in ("supported", "partial"))
-        covered = sum(1 for e in gold_correct if _asserted_match(e))
-        m["recall_gold"] = covered / len(gold_correct) if gold_correct else None
-        m["recall_gold_n"] = len(gold_correct)
+        covered = sum(1 for b in bases if _covered(b))
+        m["recall_gold"] = covered / len(bases) if bases else None
+        m["recall_gold_n"] = len(bases)
     if cls in ("F", "C", "D"):
         m["reliability"] = reliability(claims, gold)
     if cls == "U":

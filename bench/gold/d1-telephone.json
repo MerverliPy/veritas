@@ -1,0 +1,32 @@
+{
+  "query_id": "d1-telephone",
+  "class": "D",
+  "source_landscape": "Genuine historical dispute. Mainstream history credits Alexander Graham Bell (US patent granted 1876). Antonio Meucci's earlier experiments are honored by US House Resolution 269 (107th Congress, 2002), which expresses the sense of the House regarding his work but does not award invention credit. Sources therefore conflict on priority — a well-behaved report should present both sides and flag the dispute, not assert one-sided priority.",
+  "note": "DRAFT 2026-09-05 — facts checked against web sources by agent (congress.gov H.Res.269 text; Wikipedia). 'Contested' labels excluded from precision/calibration; the D-class gate checks the contradiction pass fires. The patent entry is worded (patent office + 'granted ... a patent') so a one-sided priority claim like 'Bell invented the telephone' cannot token-match it and win correct credit — priority claims resolve to the contested entries instead. OWNER MUST AUDIT before pilot numbers are meaningful.",
+  "expected_claims": [
+    {
+      "statement": "In 1876 the United States Patent Office granted Alexander Graham Bell a patent for the telephone.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Patent fact, not priority verdict; independently documented."
+    },
+    {
+      "statement": "A 2002 resolution of the United States House of Representatives honors Antonio Meucci's work on the telephone.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Factual about H.Res.269 (107th Congress); does not claim invention credit."
+    },
+    {
+      "statement": "Antonio Meucci invented the telephone, not Alexander Graham Bell.",
+      "gold_label": "contested",
+      "confidence_class": "low",
+      "note": "Priority claim; genuinely disputed — never scored correct or incorrect."
+    },
+    {
+      "statement": "Alexander Graham Bell alone is the inventor of the telephone.",
+      "gold_label": "contested",
+      "confidence_class": "low",
+      "note": "Absolute one-sided priority claim; disputed — never scored correct or incorrect. Phrased without negation so the polarity check does not exclude it."
+    }
+  ]
+}

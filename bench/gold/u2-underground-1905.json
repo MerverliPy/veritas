@@ -1,0 +1,14 @@
+{
+  "query_id": "u2-underground-1905",
+  "class": "U",
+  "source_landscape": "Thin on the specific figure. Well documented that London's deep-level tube lines were electric from their opening (City & South London Railway, 1890, the world's first deep-level electric tube) and that sub-surface lines (Metropolitan, District) were electrified around 1905 — but no accessible source states the exact number of steam locomotives still in service on the Underground in 1905. Expect honest low-confidence reporting, not a confident count.",
+  "note": "DRAFT 2026-09-05 — anchor facts checked against web sources by agent (history of the London Underground / electric locomotives). OWNER MUST AUDIT before pilot numbers are meaningful.",
+  "expected_claims": [
+    {
+      "statement": "The City & South London Railway, opened in 1890, was the world's first deep-level electric tube railway.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Verified anchor; included for documentation — the 1905 steam-locomotive count is not publicly documented."
+    }
+  ]
+}

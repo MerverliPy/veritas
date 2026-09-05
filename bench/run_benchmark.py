@@ -96,6 +96,17 @@ def preflight_errors(queries: list[dict], gold_dir: Path) -> list[str]:
                 errs.append(f"gold/{qid}.json: expected_claims[{i}] "
                             f"confidence_class {e.get('confidence_class')!r} "
                             f"not in {CONFIDENCE_ORDER}")
+        stmts = [e.get("statement") for e in expected
+                 if isinstance(e, dict) and e.get("statement")]
+        for i, e in enumerate(expected):
+            if isinstance(e, dict) and e.get("variant_of"):
+                if e["variant_of"] not in stmts:
+                    errs.append(f"gold/{qid}.json: expected_claims[{i}] "
+                                f"variant_of does not match any statement "
+                                f"in this sheet")
+                elif e["statement"] == e["variant_of"]:
+                    errs.append(f"gold/{qid}.json: expected_claims[{i}] "
+                                f"variant_of points at itself")
     return errs
 
 
