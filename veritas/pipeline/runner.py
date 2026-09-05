@@ -218,6 +218,7 @@ class Runner:
             "confidence_counts": report.confidence_counts(),
             "claims": [c.to_dict() for c in report.claims],
             "gaps": report.gaps,
+            "conflicts": report.conflicts,
             "crosscheck": report.crosscheck,
         }
         (self.outdir / "ledger.json").write_text(
