@@ -69,3 +69,18 @@ def test_sample_empty_and_deterministic():
     # sub-question order is claim order; within a sub-question it is the
     # first-seen evidence order, so both runs must agree on url order
     assert [e["url"] for e in a] == [e["url"] for e in b]
+
+
+def test_latest_run_dir_picks_by_mtime_not_name(tmp_path):
+    from bench.collect_relevance import _latest_run_dir
+    # name order says nocc-pilot is "newer", but det-2's scorecard is newer
+    for name in ("cc-20260905-100000", "nocc-pilot", "det-2"):
+        d = tmp_path / name
+        d.mkdir()
+        (d / "scorecard.json").write_text("{}")
+    import os
+    old = tmp_path / "nocc-pilot" / "scorecard.json"
+    new = tmp_path / "det-2" / "scorecard.json"
+    os.utime(old, (1_700_000_000, 1_700_000_000))
+    os.utime(new, (1_800_000_000, 1_800_000_000))
+    assert _latest_run_dir(tmp_path).name == "det-2"

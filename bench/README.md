@@ -14,8 +14,12 @@ deepseek-chat backend (`.env`), and spend real money.
 - `collect_relevance.py` — A5 rubric-sample collector (owner-run, no LLM):
   extracts ~2 sub-questions × top sources per query from a run's ledgers
   into `relevance-sample.json` + a null-filled `relevance-judgements.json`
-  you mark 0/1 (keep order), then feed via `--relevance`. Hermetic tests
-  cover sampling/dedupe/determinism. Every invocation gets its own
+  you mark 0/1 (keep order). Filled files are preserved across reruns
+  (--force resets). Latest run is picked by scorecard mtime, not name.
+- `run_benchmark.py --rescore <run-dir>` — score an EXISTING run (no new
+  missions): re-applies gold + judge + `--relevance` judgements and writes
+  `scorecard-rescore.json`. Relevance judgements MUST be scored against the
+  run whose sources produced them, so A5 always goes through --rescore. Every invocation gets its own
   `<run-id>/` subdir (default `cc|nocc-<timestamp>`, or pass `--run-id`) so
   the paired/determinism arms never clobber each other's scorecard, ledgers,
   or `llm.log` (and each arm's cost meters only its own traffic).

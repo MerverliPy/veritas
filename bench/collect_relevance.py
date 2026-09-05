@@ -9,8 +9,8 @@ judgements feed the benchmark driver's ``--relevance`` file.
 Usage:
     python3 bench/collect_relevance.py --run-dir out/bench/cc-judge2
     # reads the sample (relevance-sample.json) + fills relevance-judgements.json
-    # (replace each null with 0 or 1, keep order), then:
-    python3 bench/run_benchmark.py --relevance out/bench/cc-judge2/relevance-judgements.json --ids ...
+    # (replace each null with 0 or 1, keep order), then score THE SAME run:
+    python3 bench/run_benchmark.py --rescore out/bench/cc-judge2 --relevance out/bench/cc-judge2/relevance-judgements.json
 
 Sampling is deterministic (query order from bench/queries.json, then
 sub-question text, then source URL), so reruns produce the same sheet
@@ -75,12 +75,13 @@ def extract_sample(ledger: dict, *,
 
 
 def _latest_run_dir(out_root: Path) -> Path:
-    dirs = sorted([p for p in out_root.iterdir()
-                   if p.is_dir() and (p / "scorecard.json").exists()],
-                  key=lambda p: p.name, reverse=True)
+    """Newest run by its scorecard file mtime — run-id names mix prefixes
+    (cc-/nocc-/det-...), so name ordering is not chronological."""
+    dirs = [p for p in out_root.iterdir()
+            if p.is_dir() and (p / "scorecard.json").exists()]
     if not dirs:
         raise SystemExit(f"no run dirs (with scorecard.json) under {out_root}")
-    return dirs[0]
+    return max(dirs, key=lambda p: (p / "scorecard.json").stat().st_mtime)
 
 
 def main() -> int:
@@ -100,6 +101,9 @@ def main() -> int:
     p.add_argument("--judgements-out", default=None,
                    help="where to write the null-filled judgements list "
                         "(default: <sample dir>/relevance-judgements.json)")
+    p.add_argument("--force", action="store_true",
+                   help="overwrite an existing, already-filled judgements "
+                        "file with nulls")
     args = p.parse_args()
 
     run_dir = Path(args.run_dir) if args.run_dir else \
@@ -130,14 +134,19 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
+    if judgements_out.exists() and not args.force \
+            and any(v is not None for v in json.loads(
+                judgements_out.read_text(encoding="utf-8"))):
+        print(f"[collect] keeping filled {judgements_out} "
+              f"(rerun with --force to reset)", file=sys.stderr)
+    else:
+        judgements_out.write_text(json.dumps([None] * len(entries), indent=2))
     sample_out.write_text(json.dumps(entries, indent=2, ensure_ascii=False))
-    judgements_out.write_text(
-        json.dumps([None] * len(entries), indent=2))
     print(f"[collect] sample ({len(entries)} sources): {sample_out}")
     print(f"[collect] judgements to fill (null -> 0/1, keep order): "
           f"{judgements_out}")
-    print("[collect] then feed the filled file to run_benchmark.py "
-          "--relevance <file>")
+    print("[collect] then score THE SAME run dir with: run_benchmark.py "
+          "--rescore <run-dir> --relevance <filled judgements>")
     return 0
 
 

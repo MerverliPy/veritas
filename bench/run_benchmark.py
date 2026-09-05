@@ -111,6 +111,100 @@ def preflight_errors(queries: list[dict], gold_dir: Path) -> list[str]:
     return errs
 
 
+def _assess(q: dict, qtext: str, qout: Path, gold_dir: Path,
+             judge_enabled: bool, judge_log: Path) -> dict:
+    """Score one query's artifacts in ``qout`` (ledger.json) against its gold
+    sheet, judging each claim when enabled. Judge traffic appends to
+    ``judge_log`` and the estimate is read from that file only, so judging
+    cost stays visible and separate from the mission's own llm.log when
+    requested (rescore uses a dedicated llm-rescore.log; the execute path
+    passes the mission llm.log after the child has appended to it)."""
+    from bench.judge import make_claim_judge
+    from veritas.llm import DeepSeekClient
+
+    entry: dict = {"id": q["id"], "class": q.get("class"), "query": qtext,
+                   "ok": True, "est_cost_usd": 0.0, "metrics": {}}
+    gold_path = gold_dir / f"{q['id']}.json"
+    gold = load_json(gold_path) if gold_path.exists() else None
+    claim_judge = None
+    judge_state = None
+    try:
+        ledger = load_json(qout / "ledger.json")
+    except Exception as e:  # noqa: BLE001
+        entry["ok"] = False
+        entry["error"] = f"ledger unreadable: {e}"
+    else:
+        if judge_enabled and gold:
+            claim_judge, judge_state = make_claim_judge(
+                DeepSeekClient(log=str(judge_log)))
+        try:
+            entry["metrics"] = compute_query_metrics(
+                ledger, gold, claim_judge=claim_judge)
+        except Exception as e:  # noqa: BLE001
+            entry["ok"] = False
+            entry["error"] = f"score parse failed: {e}"
+        entry["judge_fallbacks"] = judge_state["fallbacks"] if judge_state else 0
+        entry["judge_mode"] = ("judge" if judge_state else
+                               "lexical" if gold is not None else "no-gold")
+        if gold is None:
+            entry["note"] = "no gold sheet — structure-only metrics"
+    log_text = judge_log.read_text(encoding="utf-8", errors="replace") \
+        if judge_log.exists() else ""
+    entry["est_cost_usd"] = round(est_cost_usd(log_text), 6)
+    return entry
+
+
+def _rescore_main(run_dir: Path, queries: list[dict], gold_dir: Path,
+                  judge_enabled: bool, relevance: list[int] | None,
+                  no_crosscheck: bool) -> int:
+    """Score an existing run dir without new missions: relevance judgements
+    must be scored against the run that produced the sources they describe."""
+    if not run_dir.is_dir():
+        print(f"[bench] rescore: no such run dir: {run_dir}", file=sys.stderr)
+        return 2
+    per_query = []
+    for q in queries:
+        qout = run_dir / q["id"]
+        if not (qout / "ledger.json").exists():
+            per_query.append({"id": q["id"], "class": q.get("class"),
+                              "query": q["query"], "ok": False,
+                              "error": "no ledger in run dir", "metrics": {}})
+            continue
+        per_query.append(_assess(q, q["query"], qout, gold_dir, judge_enabled,
+                                 qout / "llm-rescore.log"))
+    completed = [e for e in per_query if e.get("ok") and e.get("metrics")]
+    agg = gates([e["metrics"] for e in completed],
+                relevance_judgements=relevance)
+    n_failed = sum(1 for e in per_query if not e.get("ok"))
+    valid = n_failed == 0 and len(completed) == len(queries) \
+        and not no_crosscheck
+    out_path = run_dir / "scorecard-rescore.json"
+    scorecard = {
+        "provenance": {
+            "mode": "rescore",
+            "of_run": run_dir.name,
+            "created_at": datetime.datetime.now(datetime.timezone.utc)
+                .isoformat(),
+            "gold_judge": ("on" if judge_enabled else "off(--no-judge or no backend)"),
+            "relevance_judgements": len(relevance) if relevance else 0,
+            "judge_note": "judge cost in each query's llm-rescore.log",
+        },
+        "valid": valid,
+        "n_failed": n_failed,
+        "queries": per_query,
+        "gates": agg,
+    }
+    out_path.write_text(json.dumps(scorecard, indent=2, ensure_ascii=False))
+    print(f"[bench] rescored {len(per_query)} query(s) from {run_dir}")
+    print(f"[bench] scorecard: {out_path}  "
+          f"({'VALID' if valid else 'INVALID (advisory)'})")
+    for gate, g in agg.items():
+        ok = "PASS" if g["ok"] is True else ("FAIL" if g["ok"] is False else "n/a")
+        print(f"  {gate}: {ok}  value={g['value']}")
+    return 0
+
+
+
 def select_queries(queries: list[dict], ids: str) -> tuple[list[dict], list[str]]:
     """Filter ``queries`` by comma-separated ``ids``; return (chosen, unknown).
     Unknown ids must be rejected by the caller — silently dropping a typo'd
@@ -158,6 +252,10 @@ def main() -> int:
     p.add_argument("--no-judge", action="store_true",
                    help="skip the LLM gold judge; use lexical gold matching "
                         "(default: judge on when a reasoning backend exists)")
+    p.add_argument("--rescore", metavar="RUN_DIR", default=None,
+                   help="score an EXISTING run dir (no new missions): load "
+                        "its ledgers, apply gold + judge (unless --no-judge) "
+                        "+ --relevance judgements, write scorecard-rescore.json")
     p.add_argument("--relevance", default=None,
                    help="optional JSON file: list of 0/1 rubric judgements")
     args = p.parse_args()
@@ -189,6 +287,19 @@ def main() -> int:
             judge_enabled = _settings.has_reasoning_backend()
         except Exception:  # noqa: BLE001 - settings import must not kill the run
             judge_enabled = False
+
+    if args.rescore:
+        run_dir = Path(args.rescore)
+        # A run may contain fewer queries than queries.json: inherit its own
+        # query set unless --ids narrowed the selection.
+        orig_scorecard = run_dir / "scorecard.json"
+        if args.ids is None and orig_scorecard.exists():
+            orig_ids = set(load_json(orig_scorecard)
+                           .get("provenance", {}).get("query_ids", []))
+            if orig_ids:
+                queries = [q for q in queries if q["id"] in orig_ids]
+        return _rescore_main(run_dir, queries, gold_dir,
+                             judge_enabled, relevance, args.no_crosscheck)
 
     arm = "nocc" if args.no_crosscheck else "cc"
     run_id = args.run_id or f"{arm}-{datetime.datetime.now():%Y%m%d-%H%M%S}"
