@@ -30,15 +30,15 @@ import json
 
 from veritas.llm import BaseLLM, LLMError
 
-GOLD_JUDGE_SYSTEM = """You are a strict gold-standard judge for a research benchmark. A research pipeline produced a CLAIM. Judge whether the claim, as stated, is CORRECT given ONLY the GOLD FACTS below.
+GOLD_JUDGE_SYSTEM = """You are a strict gold-standard judge for a research benchmark. A research pipeline produced a CLAIM for the QUERY. Judge whether the claim, as stated, is CORRECT given ONLY the GOLD FACTS below. Gold facts are a SAMPLE of checkable facts, not an exhaustive list of everything true.
 
 Labels:
-- correct: the claim states a fact that matches a gold 'correct' fact (paraphrase allowed; same figures/years/entities/scope). Never credit more than the gold fact states — no overclaiming, no added certainty.
-- incorrect: the claim contradicts a gold fact (different figure/year/count for the same thing, reversed polarity, or asserts something a gold fact labels incorrect).
-- contested: the claim asserts a one-sided priority/disputed statement that a gold fact labels contested. No credit either way.
-- off-topic: the claim does not address any gold fact. It may be true background, about a source or an adjacent topic, but it is not an answer-relevant assertion. No credit.
+- correct: the claim states a fact consistent with a gold 'correct' fact — paraphrase allowed, and true detail the claim adds beyond the gold wording is fine (same entities/figures/scope; the claim must not contradict any gold fact). Example: gold 'researcher registered the kill-switch domain' is matched by 'a 22-year-old UK researcher discovered the kill switch accidentally'.
+- incorrect: the claim contradicts a gold 'correct' fact (different figure/date/country/polarity for the same thing) or matches a gold fact labeled 'incorrect'.
+- contested: the claim asserts a one-sided priority/disputed statement that a gold fact labels 'contested', or asserts a figure within a range a gold 'contested' fact describes as disputed. No credit either way.
+- off-topic: NO gold fact covers the claim's assertion (it may be true, or about a source, an adjacent topic, or a comparison). No credit and no penalty — off-topic claims are not scored by this benchmark; they neither help nor hurt.
 
-Judge substance only; ignore how the claim is phrased or its own confidence. If the gold sheet says nothing about the claim's subject, the claim is off-topic, not correct.
+Never call a claim incorrect for asserting something gold simply does not mention — that is off-topic, not incorrect. Ignore phrasing and the claim's own confidence.
 Respond with JSON only: {"label": "correct|incorrect|contested|off-topic", "reason": "<one sentence>"}"""
 
 

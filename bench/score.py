@@ -271,6 +271,7 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
         "judge_counts": {},       # judge label distribution when judging
         # default nulls
         "precision_supported": None, "precision_supported_n": 0,
+        "precision_unscored_n": 0,
         "recall_gold": None, "recall_gold_n": 0,
         "reliability": {"high": None, "high_n": 0, "medium": None,
                         "medium_n": 0, "low": None, "low_n": 0},
@@ -312,11 +313,16 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
     expected = gold.get("expected_claims", [])
     if cls in ("F", "C"):
         supported = [c for c in claims if c["verdict"] == "supported"]
-        scored = [c for c in supported]
-        correct = sum(1 for c in scored
-                      if claim_label(c["statement"]) == "correct")
-        m["precision_supported"] = correct / len(scored) if scored else None
-        m["precision_supported_n"] = len(scored)
+        labels = [claim_label(c["statement"]) for c in supported]
+        correct = sum(1 for l in labels if l == "correct")
+        placed = sum(1 for l in labels if l in ("correct", "incorrect"))
+        # Precision is correct/(correct+incorrect) over claims the gold can
+        # place. Gold is a SAMPLE of checkable facts: a correct report's
+        # extra true claims (context, comparisons) are off-topic to gold and
+        # must not be scored as wrong — they are excluded and reported.
+        m["precision_supported"] = correct / placed if placed else None
+        m["precision_supported_n"] = placed
+        m["precision_unscored_n"] = len(supported) - placed
         # Recall counts distinct base facts. A 'variant_of' entry is an
         # alternate phrasing of a base fact, not a second required fact — it
         # would otherwise inflate the recall denominator.

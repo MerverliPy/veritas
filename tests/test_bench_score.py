@@ -109,7 +109,8 @@ def test_f_class_precision_and_recall():
               claim("Penguins breed on the Antarctic continent during winter.")]
     m = compute_query_metrics(ledger(claims), g)
     assert m["class"] == "F"
-    assert m["precision_supported"] == 2 / 3   # unmatched supported = not correct
+    assert m["precision_supported"] == 1.0    # unmatched claim is not scored wrong
+    assert m["precision_unscored_n"] == 1      # ...it is excluded and reported
     assert m["recall_gold"] == 2 / 3           # 2 of 3 gold-correct covered
 
 
@@ -438,20 +439,23 @@ def test_atomic_gold_matches_verifier_shaped_claims():
 
 def test_quantity_roles_never_swapped():
     """Role-aware check: '150 computers' must not match gold's '200,000
-    computers' even though {150, 2017} is a subset of gold's quantities."""
+    computers' even though {150} is a subset of gold's quantities."""
+    scale = [exp("WannaCry infected roughly 200,000 computers in May 2017.")]
+    exact = "WannaCry infected roughly 200,000 computers in May 2017."
+    assert gold_verdict(exact, scale) == "correct"
+    swapped = "WannaCry infected roughly 150 computers in May 2017."
+    assert gold_verdict(swapped, scale) != "correct"            # role swap
+    machines = "WannaCry infected roughly 200,000 machines in May 2017."
+    assert gold_verdict(machines, scale) == "correct"           # synonym role
+    # f1 sheet: the 150-countries fact stays correct; the infection-count
+    # fact is contested (estimates 200k-300k+), so count claims are excluded
     repo = Path(__file__).resolve().parents[1]
-    g = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
-    expected = g["expected_claims"]
-    scale = "WannaCry infected roughly 200,000 computers across more than " \
-            "150 countries in May 2017."
-    assert gold_verdict(scale, expected) == "correct"          # exact scale
-    assert gold_verdict("WannaCry infected roughly 150 computers across "
-                        "more than 150 countries in May 2017.",
-                        expected) != "correct"                  # role swap
-    assert gold_verdict("WannaCry infected roughly 200,000 computers across "
-                        "more than 150 countries.",
-                        expected) == "correct"                  # omitted year ok
-
+    f1 = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
+    fe = f1["expected_claims"]
+    assert gold_verdict("WannaCry affected computers in more than 150 "
+                        "countries in May 2017.", fe) == "correct"
+    assert gold_verdict("WannaCry infected roughly 200,000 computers "
+                        "in May 2017.", fe) == "contested"
 
 def test_variant_does_not_inflate_recall():
     repo = Path(__file__).resolve().parents[1]
@@ -541,17 +545,13 @@ def test_f1_positive_patch_delay_claim_matches():
 
 
 def test_synonym_quantity_roles_never_swapped():
-    """'150 machines' vs gold '200,000 computers' must reject: anchor roles
+    """'150 machines' must not match gold '200,000 computers': anchor roles
     are normalized (machines -> computers) before comparison."""
-    repo = Path(__file__).resolve().parents[1]
-    f1 = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
-    expected = f1["expected_claims"]
-    assert gold_verdict("WannaCry infected roughly 150 machines across more "
-                        "than 150 countries in May 2017.",
-                        expected) != "correct"
-    assert gold_verdict("WannaCry infected roughly 200,000 machines across "
-                        "more than 150 countries in May 2017.",
-                        expected) == "correct"
+    scale = [exp("WannaCry infected roughly 200,000 computers in May 2017.")]
+    swapped = "WannaCry infected roughly 150 machines in May 2017."
+    assert gold_verdict(swapped, scale) != "correct"
+    exact = "WannaCry infected roughly 200,000 machines in May 2017."
+    assert gold_verdict(exact, scale) == "correct"
 
 
 def test_double_negation_never_certifies_opposite():
