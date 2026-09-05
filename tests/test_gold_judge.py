@@ -54,9 +54,10 @@ def test_judge_outage_falls_back_to_lexical_and_counts():
            "Shadow Brokers."  # identical to gold -> lexical correct
     assert cb(stmt, GOLD["expected_claims"]) == "correct"
     assert state["fallbacks"] == 1
-    # lexically unmatched claim falls back to unmatched
+    # lexically unmatched claim falls back to the FALLBACK_UNMATCHED sentinel
+    from bench.score import FALLBACK_UNMATCHED
     assert cb("Something completely different.", GOLD["expected_claims"]) \
-        == "unmatched"
+        == FALLBACK_UNMATCHED
     assert state["fallbacks"] == 2
 
 
@@ -93,3 +94,38 @@ def test_invalid_label_counts_as_fallback():
            "Shadow Brokers."
     assert cb(stmt, GOLD["expected_claims"]) == "correct"   # lexical fallback
     assert state["fallbacks"] == 1
+
+
+def test_outage_fallback_stays_in_precision_denominator():
+    """One judged-correct claim + one judge outage on an unmatched claim
+    must report 50% precision, never 100% (fallback != judge off-topic)."""
+    from bench.score import FALLBACK_UNMATCHED, compute_query_metrics
+    gold = {"query_id": "q", "class": "F", "expected_claims": [
+        {"statement": "EternalBlue was released publicly in April 2017 by "
+                       "the Shadow Brokers.",
+         "gold_label": "correct", "confidence_class": "high"}]}
+    good = "EternalBlue was released publicly in April 2017 by the Shadow Brokers."
+    fab = "The Moon is made of cheese."      # lexically unmatched + outage
+    claims = [
+        {"id": "c1", "statement": good, "subquestion": "", "evidence": [],
+         "verdict": "supported", "confidence": "medium", "crosschecked": False,
+         "conflicts": [], "note": ""},
+        {"id": "c2", "statement": fab, "subquestion": "", "evidence": [],
+         "verdict": "supported", "confidence": "medium", "crosschecked": False,
+         "conflicts": [], "note": ""}]
+    ledger = {"query": "q", "created_at": "", "surfaces": ["web"],
+              "confidence_counts": {}, "claims": claims, "gaps": [],
+              "crosscheck": {}, "conflicts": []}
+
+    def respond(u):
+        claim = u.rsplit("CLAIM TO JUDGE:\n", 1)[-1].split("\n\n", 1)[0]
+        return '{"label": "correct", "reason": "t"}' if "Shadow Brokers" in claim \
+            else '{"label": "oops"}'   # invalid label -> JudgeError -> fallback
+    llm = FakeLLM({GOLD_JUDGE_SYSTEM: respond})
+    cb, state = make_claim_judge(llm)
+    m = compute_query_metrics(ledger, gold, claim_judge=cb)
+    assert m["precision_supported"] == 0.5     # 1 correct of 2 placed
+    assert m["precision_unscored_n"] == 0      # nothing excluded
+    assert state["fallbacks"] == 1
+    # sanity: the sentinel is what claim_judge returns on outage
+    assert cb(fab, gold["expected_claims"]) == FALLBACK_UNMATCHED

@@ -16,6 +16,11 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+# Protocol constant shared with bench/judge.py (kept local to avoid an import
+# cycle): a judge OUTAGE that could not place a claim. Scored as not-correct,
+# never excluded like a judge 'off-topic'.
+FALLBACK_UNMATCHED = "__fallback_unmatched__"
+
 
 # --------------------------------------------------------------------------
 # Cost estimation (ESTIMATE ONLY) — VERITAS_LLM_LOG chars -> USD.
@@ -296,15 +301,20 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
             return _label_cache[statement]
         if claim_judge is not None:
             label = claim_judge(statement, expected, ledger.get("query"))
+            if label == FALLBACK_UNMATCHED:
+                # Judge outage: the claim could not be placed. It is scored
+                # as not-correct (conservative) but is not judge output.
+                _label_cache[statement] = "unmatched_fallback"
+                return "unmatched_fallback"
             m["judge_counts"][label] = m["judge_counts"].get(label, 0) + 1
             if label == "correct":
                 out = "correct"
-            elif label == "incorrect":
+            elif label in ("incorrect",):
                 out = "incorrect"
             elif label == "contested":
                 out = "contested"
             else:
-                out = "unmatched"  # off-topic / judge fallback
+                out = "unmatched"  # judge off-topic: no gold coverage
         else:
             out = gold_verdict(statement, expected)
         _label_cache[statement] = out
@@ -320,7 +330,8 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
             # it cannot place (off-topic true context) are excluded and
             # reported, never scored wrong. Fabrication is caught by the
             # judge labeling demonstrably false claims 'incorrect'.
-            placed = sum(1 for l in labels if l in ("correct", "incorrect"))
+            placed = sum(1 for l in labels
+                         if l in ("correct", "incorrect", "unmatched_fallback"))
             m["precision_supported"] = correct / placed if placed else None
             m["precision_supported_n"] = placed
             m["precision_unscored_n"] = len(supported) - placed

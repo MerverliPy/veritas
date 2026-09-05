@@ -102,6 +102,9 @@ def make_gold_judge(llm: BaseLLM) -> callable:
     return judge
 
 
+FALLBACK_UNMATCHED = "__fallback_unmatched__"
+
+
 class JudgeError(RuntimeError):
     pass
 
@@ -124,6 +127,13 @@ def make_claim_judge(llm: BaseLLM) -> tuple[callable, dict]:
             return judge(statement, expected, query)
         except Exception:  # noqa: BLE001 - outage must fall back, not fail
             state["fallbacks"] += 1
-            return _lexical(statement, expected)
+            lexical = _lexical(statement, expected)
+            # Provenance matters: a judge 'off-topic' is excluded from
+            # precision, but an outage fallback that cannot place the claim
+            # must still count as not-correct (conservative) — never as
+            # judge output.
+            if lexical in ("correct", "incorrect", "contested"):
+                return lexical
+            return FALLBACK_UNMATCHED
 
     return judge_cb, state
