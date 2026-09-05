@@ -1,0 +1,42 @@
+{
+  "revision": "pilot-1",
+  "note": "SEED SET — starting points for owner curation before execution. Each query needs a filled bench/gold/<id>.json sheet before A1-A5 scoring; the runner reports structure-only metrics otherwise. Query text is public; gold labels are scoring data the pipeline never reads.",
+  "queries": [
+    {
+      "id": "f1-wannacry",
+      "class": "F",
+      "query": "Why did the WannaCry ransomware worm spread so fast in May 2017?",
+      "note": "Canonical anchor: the 2026-09-05 showcase sample already ran this and self-disclosed all-medium confidence — a regression/calibration reference for the pilot."
+    },
+    {
+      "id": "f2-sputnik",
+      "class": "F",
+      "query": "In which year and by which country was Sputnik 1, the first artificial satellite, launched?",
+      "note": "Closed factual; single well-documented answer reachable by Wikipedia + DuckDuckGo HTML."
+    },
+    {
+      "id": "c1-comet-asteroid",
+      "class": "C",
+      "query": "What distinguishes a comet from an asteroid?",
+      "note": "Definitional/comparative; encyclopedic, stable."
+    },
+    {
+      "id": "d1-telephone",
+      "class": "D",
+      "query": "Was the telephone invented by Alexander Graham Bell or by Antonio Meucci?",
+      "note": "Disagreement class: genuine historical dispute, sources conflict (incl. the 2002 US House resolution on Meucci). Expect the contradiction pass to fire and no confident one-sided high."
+    },
+    {
+      "id": "u1-trieste-1928",
+      "class": "U",
+      "query": "What was the total annual cargo tonnage handled by the port of Trieste in 1928?",
+      "note": "Deliberately hard/niche: thin, mostly paywalled or archive-only web evidence. Expect unsupported/low or gaps, never confident fabrication."
+    },
+    {
+      "id": "u2-underground-1905",
+      "class": "U",
+      "query": "How many steam locomotives were in service on the London Underground in 1905?",
+      "note": "Hard/niche: obscure statistic, likely thin public evidence; tests honest failure."
+    }
+  ]
+}
