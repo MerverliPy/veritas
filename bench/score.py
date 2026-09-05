@@ -16,6 +16,11 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+# Protocol constant shared with bench/judge.py (kept local to avoid an import
+# cycle): a judge OUTAGE that could not place a claim. Scored as not-correct,
+# never excluded like a judge 'off-topic'.
+FALLBACK_UNMATCHED = "__fallback_unmatched__"
+
 
 # --------------------------------------------------------------------------
 # Cost estimation (ESTIMATE ONLY) — VERITAS_LLM_LOG chars -> USD.
@@ -222,14 +227,17 @@ def query_class(gold: dict | None) -> str | None:
 # Metrics
 # --------------------------------------------------------------------------
 
-def reliability(claims: list[dict], gold: dict) -> dict[str, float | int]:
+def reliability(claims: list[dict], gold: dict,
+                label_fn=gold_verdict) -> dict[str, float | int]:
     """P(gold-correct | confidence=b) over claims with an unambiguous gold
-    label (correct/incorrect; contested excluded), verdict supported/partial."""
+    label (correct/incorrect; contested/off-topic excluded), verdict
+    supported/partial. ``label_fn`` maps a statement to its gold label
+    (lexical by default, LLM judge when injected)."""
     buckets = {b: [0, 0] for b in ("high", "medium", "low")}  # correct, total
     for c in claims:
         if c["verdict"] not in ("supported", "partial"):
             continue
-        gv = gold_verdict(c["statement"], gold["expected_claims"])
+        gv = label_fn(c["statement"])
         if gv not in ("correct", "incorrect"):
             continue
         b = c["confidence"]
@@ -244,9 +252,15 @@ def reliability(claims: list[dict], gold: dict) -> dict[str, float | int]:
     return out
 
 
-def compute_query_metrics(ledger: dict, gold: dict | None) -> dict:
+def compute_query_metrics(ledger: dict, gold: dict | None,
+                          claim_judge=None) -> dict:
     """Metrics for one query run (spec §5). Gold-less runs report structure
-    only; every *_n field is 0 and pass-relevant values are None."""
+    only; every *_n field is 0 and pass-relevant values are None.
+
+    ``claim_judge`` (optional) labels each claim against gold facts
+    (bench/judge.py) for precision/calibration — the lexical matcher cannot
+    credit the pipeline's generative claims. When absent, lexical
+    ``gold_verdict`` is used. Recall stays lexical in both cases."""
     claims = ledger.get("claims", [])
     cls = query_class(gold)
     m: dict = {
@@ -259,8 +273,10 @@ def compute_query_metrics(ledger: dict, gold: dict | None) -> dict:
         "crosschecked": sum(1 for c in claims if c.get("crosschecked")),
         "asserted_n": 0,          # claims the pipeline stands behind
         "high_asserted_n": 0,     # asserted + confidence high (cross-check win)
+        "judge_counts": {},       # judge label distribution when judging
         # default nulls
         "precision_supported": None, "precision_supported_n": 0,
+        "precision_unscored_n": 0,
         "recall_gold": None, "recall_gold_n": 0,
         "reliability": {"high": None, "high_n": 0, "medium": None,
                         "medium_n": 0, "low": None, "low_n": 0},
@@ -276,13 +292,58 @@ def compute_query_metrics(ledger: dict, gold: dict | None) -> dict:
         return m
 
     expected = gold.get("expected_claims", [])
+    _label_cache: dict[str, str] = {}
+
+    def claim_label(statement: str) -> str:
+        # Memoize: each claim is judged once even when several metrics
+        # (precision, calibration) consume the same label.
+        if statement in _label_cache:
+            return _label_cache[statement]
+        if claim_judge is not None:
+            label = claim_judge(statement, expected, ledger.get("query"))
+            if label == FALLBACK_UNMATCHED:
+                # Judge outage: the claim could not be placed. Treat it as
+                # 'incorrect' everywhere (precision denominator AND the A2
+                # calibration buckets) — confidence placed in an unverifiable
+                # claim is a conservative calibration miss, never a credit.
+                _label_cache[statement] = "incorrect"
+                return "incorrect"
+            m["judge_counts"][label] = m["judge_counts"].get(label, 0) + 1
+            if label == "correct":
+                out = "correct"
+            elif label in ("incorrect",):
+                out = "incorrect"
+            elif label == "contested":
+                out = "contested"
+            else:
+                out = "unmatched"  # judge off-topic: no gold coverage
+        else:
+            out = gold_verdict(statement, expected)
+        _label_cache[statement] = out
+        return out
+
+    expected = gold.get("expected_claims", [])
     if cls in ("F", "C"):
         supported = [c for c in claims if c["verdict"] == "supported"]
-        scored = [c for c in supported]
-        correct = sum(1 for c in scored
-                      if gold_verdict(c["statement"], expected) == "correct")
-        m["precision_supported"] = correct / len(scored) if scored else None
-        m["precision_supported_n"] = len(scored)
+        labels = [claim_label(c["statement"]) for c in supported]
+        correct = sum(1 for l in labels if l == "correct")
+        if claim_judge is not None:
+            # Judge semantics: gold is a SAMPLE of checkable facts, so claims
+            # it cannot place (off-topic true context) are excluded and
+            # reported, never scored wrong. Fabrication is caught by the
+            # judge labeling demonstrably false claims 'incorrect'.
+            placed = sum(1 for l in labels if l in ("correct", "incorrect"))
+            m["precision_supported"] = correct / placed if placed else None
+            m["precision_supported_n"] = placed
+            m["precision_unscored_n"] = len(supported) - placed
+        else:
+            # Lexical semantics (fallback / --no-judge): the matcher cannot
+            # tell a true paraphrase from a falsehood, so every supported
+            # claim counts and unmatched means not-correct (conservative).
+            m["precision_supported"] = (correct / len(supported)
+                                         if supported else None)
+            m["precision_supported_n"] = len(supported)
+            m["precision_unscored_n"] = 0
         # Recall counts distinct base facts. A 'variant_of' entry is an
         # alternate phrasing of a base fact, not a second required fact — it
         # would otherwise inflate the recall denominator.
@@ -298,7 +359,7 @@ def compute_query_metrics(ledger: dict, gold: dict | None) -> dict:
         m["recall_gold"] = covered / len(bases) if bases else None
         m["recall_gold_n"] = len(bases)
     if cls in ("F", "C", "D"):
-        m["reliability"] = reliability(claims, gold)
+        m["reliability"] = reliability(claims, gold, claim_label)
     if cls == "U":
         asserted = claims
         low_or_un = [c for c in asserted

@@ -42,10 +42,16 @@
       "note": "Attack path; the canonical question's core."
     },
     {
-      "statement": "WannaCry infected roughly 200,000 computers across more than 150 countries in May 2017.",
+      "statement": "WannaCry affected computers in more than 150 countries in May 2017.",
       "gold_label": "correct",
       "confidence_class": "medium",
-      "note": "Scale; widely reported estimates."
+      "note": "Geographic spread; widely cited and stable."
+    },
+    {
+      "statement": "WannaCry infected roughly 200,000 computers in May 2017.",
+      "gold_label": "contested",
+      "confidence_class": "low",
+      "note": "Infection-count estimates range from ~200,000 (early government estimates) to 300,000+ (later analyses) — a disputed figure, so claims within that range score neither correct nor incorrect."
     },
     {
       "statement": "WannaCry spread very fast because it was a self-propagating worm.",
