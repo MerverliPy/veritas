@@ -14,7 +14,11 @@ venv/
 dist/
 build/
 
-# outputs
+# outputs — `veritas run` artifacts
+# default ./out, plus the exact filenames the runner emits (report.md,
+# ledger.json) so a custom --outdir is never accidentally committed.
 out/
+report.md
+ledger.json
 *.report.md
 *.ledger.json
