@@ -19,17 +19,22 @@ flowchart LR
   X -.->|"unmatched claims re-verified"| V
   V --> D[contradiction detection]
   X --> D
-  C -.->|claims without evidence| G[gaps]
-  V -.->|contradicted / unsupported| G
-  G --> OUT["report.md + ledger.json<br/>(gaps + conflicts surfaced)"]
-  D -.->|conflicts| OUT
+  R -.->|no evidence for a sub-question| G[research gaps]
+  C -.->|claims without evidence| G
+  X -.->|cross-check gaps| G
+  V -.->|unsupported| NE["Not established"]
+  V -.->|contradicted| CO["Conflicts in the evidence"]
+  D -.->|conflict pairs| CO
+  G --> OUT["report.md + ledger.json"]
+  NE --> OUT
+  CO --> OUT
   D --> S[synthesize]
   S --> OUT
 ```
 
 Text fallback: plan → research → claims → verify → cross-check (optional) → contradiction detection → synthesize
 
-*Caption: Evidence is bound and re-verified before synthesis; gaps and conflicts remain visible in the output.*
+*Caption: Evidence is bound and re-verified before synthesis; research gaps, unsupported claims, and conflicts stay visible in the output.*
 
 ## Install & configure
 
@@ -60,8 +65,9 @@ veritas run "Compare X and Y" --surfaces web,local,code \
 Every run writes two artifacts to `--outdir` (default `./out`):
 
 * **`report.md`** — human report: answer prose, per-claim confidence table,
-  verified claims with numbered sources, *Not established* gaps, *Conflicts in
-  the evidence*, and the cross-check summary.
+  verified claims with numbered sources, *Not established* (unsupported
+  claims), research gaps, *Conflicts in the evidence*, and the cross-check
+  summary.
 * **`ledger.json`** — machine-readable evidence ledger: every claim with its
   verdict, confidence, and full evidence objects (source + quoted passage).
 

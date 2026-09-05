@@ -145,4 +145,4 @@ dominant cost and is parallelised (4 workers) over claims.
 | antonym contradictions | dedicated semantic contradiction pass |
 | overclaiming ("all" vs "most") | verifier returns partial + corrected statement |
 | silent gaps | unsupported claims reported under *Not established* |
-| audit loss | `ledger.json` persists per run in the output directory; generated outputs are gitignored (not repo-provenanced); `VERITAS_LLM_LOG` captures prompts when set |
+| audit loss | `ledger.json` and `report.md` persist per run in the output directory; the default `./out` is gitignored, but custom `--outdir` locations are not — curate or track generated outputs deliberately; `VERITAS_LLM_LOG` captures prompts when set |
