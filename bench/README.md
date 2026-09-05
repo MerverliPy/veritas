@@ -10,7 +10,12 @@ deepseek-chat backend (`.env`), and spend real money.
 - `score.py` — pure, unit-tested scoring (metrics + A1–A6 gates). Hermetic.
 - `run_benchmark.py` — orchestrator: runs each query through the real CLI,
   meters cost from `VERITAS_LLM_LOG`, enforces a per-run USD cap, writes
-  `out/bench/<run-id>/scorecard.json`. Every invocation gets its own
+  `out/bench/<run-id>/scorecard.json`.
+- `collect_relevance.py` — A5 rubric-sample collector (owner-run, no LLM):
+  extracts ~2 sub-questions × top sources per query from a run's ledgers
+  into `relevance-sample.json` + a null-filled `relevance-judgements.json`
+  you mark 0/1 (keep order), then feed via `--relevance`. Hermetic tests
+  cover sampling/dedupe/determinism. Every invocation gets its own
   `<run-id>/` subdir (default `cc|nocc-<timestamp>`, or pass `--run-id`) so
   the paired/determinism arms never clobber each other's scorecard, ledgers,
   or `llm.log` (and each arm's cost meters only its own traffic).
