@@ -109,8 +109,8 @@ def test_f_class_precision_and_recall():
               claim("Penguins breed on the Antarctic continent during winter.")]
     m = compute_query_metrics(ledger(claims), g)
     assert m["class"] == "F"
-    assert m["precision_supported"] == 1.0    # unmatched claim is not scored wrong
-    assert m["precision_unscored_n"] == 1      # ...it is excluded and reported
+    assert m["precision_supported"] == 2 / 3   # lexical: unmatched = not correct
+    assert m["precision_unscored_n"] == 0      # (judge path only)
     assert m["recall_gold"] == 2 / 3           # 2 of 3 gold-correct covered
 
 

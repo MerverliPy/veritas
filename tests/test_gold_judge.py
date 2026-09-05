@@ -80,8 +80,8 @@ def test_judge_precision_integration():
     m = compute_query_metrics(ledger, gold, claim_judge=cb)
     assert m["precision_supported"] == 1.0     # judge credits what lexical can't
     assert m["judge_counts"] == {"correct": 1}
-    # lexical-only baseline for the same claim: nothing is placed on gold
-    assert compute_query_metrics(ledger, gold)["precision_supported"] is None
+    # lexical-only baseline for the same claim: unmatched supported = 0 credit
+    assert compute_query_metrics(ledger, gold)["precision_supported"] == 0.0
 
 
 def test_invalid_label_counts_as_fallback():

@@ -315,14 +315,23 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
         supported = [c for c in claims if c["verdict"] == "supported"]
         labels = [claim_label(c["statement"]) for c in supported]
         correct = sum(1 for l in labels if l == "correct")
-        placed = sum(1 for l in labels if l in ("correct", "incorrect"))
-        # Precision is correct/(correct+incorrect) over claims the gold can
-        # place. Gold is a SAMPLE of checkable facts: a correct report's
-        # extra true claims (context, comparisons) are off-topic to gold and
-        # must not be scored as wrong — they are excluded and reported.
-        m["precision_supported"] = correct / placed if placed else None
-        m["precision_supported_n"] = placed
-        m["precision_unscored_n"] = len(supported) - placed
+        if claim_judge is not None:
+            # Judge semantics: gold is a SAMPLE of checkable facts, so claims
+            # it cannot place (off-topic true context) are excluded and
+            # reported, never scored wrong. Fabrication is caught by the
+            # judge labeling demonstrably false claims 'incorrect'.
+            placed = sum(1 for l in labels if l in ("correct", "incorrect"))
+            m["precision_supported"] = correct / placed if placed else None
+            m["precision_supported_n"] = placed
+            m["precision_unscored_n"] = len(supported) - placed
+        else:
+            # Lexical semantics (fallback / --no-judge): the matcher cannot
+            # tell a true paraphrase from a falsehood, so every supported
+            # claim counts and unmatched means not-correct (conservative).
+            m["precision_supported"] = (correct / len(supported)
+                                         if supported else None)
+            m["precision_supported_n"] = len(supported)
+            m["precision_unscored_n"] = 0
         # Recall counts distinct base facts. A 'variant_of' entry is an
         # alternate phrasing of a base fact, not a second required fact — it
         # would otherwise inflate the recall denominator.
