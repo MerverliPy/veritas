@@ -156,40 +156,46 @@ def _assess(q: dict, qtext: str, qout: Path, gold_dir: Path,
 
 def _rescore_main(run_dir: Path, queries: list[dict], gold_dir: Path,
                   judge_enabled: bool, relevance: list[int] | None,
-                  no_crosscheck: bool) -> int:
-    """Score an existing run dir without new missions: relevance judgements
-    must be scored against the run that produced the sources they describe."""
-    if not run_dir.is_dir():
-        print(f"[bench] rescore: no such run dir: {run_dir}", file=sys.stderr)
-        return 2
-    if relevance is not None:
-        err = relevance_binding_error(len(relevance), run_dir /
-                                      "relevance-sample.json")
-        if err:
-            print(f"[bench] rescore aborted: {err}", file=sys.stderr)
-            return 2
+                  no_crosscheck: bool, cap_usd: float) -> int:
+    """Score an existing run dir without new missions. Relevance judgements
+    are bound to this run's sample by the caller; the judge spend respects
+    the cap."""
     per_query = []
-    for q in queries:
+    capped = False
+    total_usd = 0.0
+    for idx, q in enumerate(queries):
+        if capped:
+            per_query.append({"id": q["id"], "class": q.get("class"),
+                              "query": q.get("query", ""), "ok": False,
+                              "skipped_cap": True, "metrics": {}})
+            continue
         if q.get("_unresolved"):
-            per_query.append({"id": q["id"], "class": None, "query": "",
-                              "ok": False,
-                              "error": "query id recorded in the run is "
-                                       "missing from the queries spec",
+            per_query.append({"id": q["id"], "class": q.get("class"),
+                              "query": q.get("query", ""), "ok": False,
+                              "error": q.get("_reason", "unresolved query"),
                               "metrics": {}})
             continue
         qout = run_dir / q["id"]
         if not (qout / "ledger.json").exists():
             per_query.append({"id": q["id"], "class": q.get("class"),
-                              "query": q["query"], "ok": False,
+                              "query": q.get("query", ""), "ok": False,
                               "error": "no ledger in run dir", "metrics": {}})
             continue
-        per_query.append(_assess(q, q["query"], qout, gold_dir, judge_enabled,
-                                 qout / "llm-rescore.log"))
+        entry = _assess(q, q.get("query") or "", qout, gold_dir, judge_enabled,
+                        qout / "llm-rescore.log")
+        per_query.append(entry)
+        total_usd += entry.get("est_cost_usd", 0.0)
+        if total_usd >= cap_usd and queries[idx + 1:]:
+            capped = True
+            print(f"[bench] rescore cap ${cap_usd:.2f} reached "
+                  f"(cumulative ${total_usd:.4f}) — skipping the remaining "
+                  f"queries' judging (scorecard capped-partial)")
     completed = [e for e in per_query if e.get("ok") and e.get("metrics")]
     agg = gates([e["metrics"] for e in completed],
                 relevance_judgements=relevance)
-    n_failed = sum(1 for e in per_query if not e.get("ok"))
-    valid = n_failed == 0 and len(completed) == len(queries) \
+    n_failed = sum(1 for e in per_query if not e.get("ok")
+                   and not e.get("skipped_cap"))
+    valid = n_failed == 0 and not capped and len(completed) == len(queries) \
         and not no_crosscheck
     out_path = run_dir / "scorecard-rescore.json"
     scorecard = {
@@ -198,9 +204,11 @@ def _rescore_main(run_dir: Path, queries: list[dict], gold_dir: Path,
             "of_run": run_dir.name,
             "created_at": datetime.datetime.now(datetime.timezone.utc)
                 .isoformat(),
-            "gold_judge": ("on" if judge_enabled else "off(--no-judge or no backend)"),
+            "gold_judge": ("on" if judge_enabled
+                           else "off(--no-judge or no backend)"),
             "relevance_judgements": len(relevance) if relevance else 0,
             "judge_note": "judge cost in each query's llm-rescore.log",
+            "capped_partial": capped,
         },
         "valid": valid,
         "n_failed": n_failed,
@@ -217,21 +225,52 @@ def _rescore_main(run_dir: Path, queries: list[dict], gold_dir: Path,
     return 0
 
 
+def read_keyed_relevance(path: str | Path) -> tuple[list[int], str | None]:
+    """Read a judgements file: the collector's keyed object
+    {"sample_sha": ..., "judgements": [0/1...]} or a legacy plain list
+    (sha None). Garbage fails loudly."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if isinstance(data, dict):
+        judgements = data.get("judgements")
+        sha = data.get("sample_sha")
+        if not isinstance(judgements, list) or not isinstance(sha, str):
+            raise ValueError(f"relevance file {path}: keyed judgements need "
+                             f"'judgements' list + 'sample_sha'")
+    elif isinstance(data, list):
+        judgements, sha = data, None
+    else:
+        raise ValueError(f"relevance file {path}: must be a list or a keyed "
+                         f"object")
+    out = []
+    for i, v in enumerate(judgements):
+        if isinstance(v, bool) or not isinstance(v, int) or v not in (0, 1):
+            raise ValueError(f"relevance file {path}: item {i} is not 0/1 "
+                             f"(got {v!r})")
+        out.append(v)
+    return out, sha
 
-def relevance_binding_error(n_judgements: int, sample_path: Path) -> str | None:
-    """A5 judgements describe THIS run's relevance-sample.json, in its order
-    and length — a stray [1] must never make A5 pass on an unrelated run."""
+
+def relevance_binding_error(judgements_sha: str | None,
+                            sample_path: Path) -> str | None:
+    """A5 judgements MUST be bound to THIS run's relevance-sample.json by
+    sha — same-length samples from different runs are different sources, so
+    length alone never suffices and a plain un-keyed list cannot be bound."""
     if not sample_path.exists():
         return (f"relevance judgements given but no relevance-sample.json in "
                 f"the run dir — collect one first (collect_relevance.py)")
     try:
-        sample = json.loads(sample_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return f"run relevance-sample.json is unreadable: {sample_path}"
-    if len(sample) != n_judgements:
-        return (f"relevance judgements ({n_judgements}) do not match the "
-                f"run's {len(sample)}-source sample — collect/refill "
-                f"relevance-sample.json for this run")
+        sample_sha = hashlib.sha1(
+            sample_path.read_text(encoding="utf-8").encode()).hexdigest()[:16]
+    except OSError:
+        return f"run relevance-sample.json unreadable: {sample_path}"
+    if judgements_sha is None:
+        return (f"relevance judgements are not bound to this run (plain "
+                f"list) — regenerate with collect_relevance.py so they carry "
+                f"the run's sample_sha")
+    if judgements_sha != sample_sha:
+        return (f"relevance judgements sample_sha {judgements_sha} does not "
+                f"match this run's {sample_sha} — they describe different "
+                f"run samples")
     return None
 
 
@@ -296,13 +335,6 @@ def main() -> int:
         queries, unknown = select_queries(queries, args.ids)
         if unknown:
             p.error(f"unknown query id(s): {', '.join(unknown)}")
-    relevance = None
-    if args.relevance:
-        try:
-            relevance = parse_relevance(args.relevance)
-        except ValueError as e:
-            p.error(str(e))
-
     gold_dir = REPO / "bench" / "gold"
     errs = preflight_errors(queries, gold_dir)
     if errs:
@@ -321,39 +353,66 @@ def main() -> int:
     if args.rescore:
         run_dir = Path(args.rescore)
         orig_scorecard = run_dir / "scorecard.json"
-        nocc_orig = False
-        orig_ids = []
-        if orig_scorecard.exists():
-            prov = load_json(orig_scorecard).get("provenance", {})
-            nocc_orig = prov.get("crosscheck") == "off"
-            orig_ids = prov.get("query_ids", [])
-        if args.ids is None and orig_ids:
-            # The run's recorded query set is authoritative: a recorded id
-            # missing from the current spec, or whose query text/class has
-            # drifted, makes the rescore unresolvable — the old ledger would
-            # be scored against a definition that never ran it.
-            recorded = {e["id"]: e for e in
-                        load_json(orig_scorecard).get("queries", [])}
-            by_id = {q["id"]: q for q in queries}
-            resolved = []
-            for i in orig_ids:
-                if i not in by_id:
-                    resolved.append({"id": i, "class": None, "query": "",
-                                     "_unresolved": True,
-                                     "_reason": "missing from queries spec"})
-                    continue
-                rec = recorded.get(i) or {}
-                if rec.get("query") and rec["query"] != by_id[i]["query"]:
-                    resolved.append({"id": i, "class": by_id[i].get("class"),
-                                     "query": by_id[i]["query"],
-                                     "_unresolved": True,
-                                     "_reason": "query text drifted since "
-                                               "the run"})
-                    continue
-                resolved.append(by_id[i])
-            queries = resolved
-        return _rescore_main(run_dir, queries, gold_dir, judge_enabled,
-                             relevance, args.no_crosscheck or nocc_orig)
+        if not orig_scorecard.exists():
+            p.error(f"rescore requires the run's scorecard.json "
+                    f"(not found in {run_dir})")
+        orig = load_json(orig_scorecard)
+        prov = orig.get("provenance", {})
+        nocc_orig = prov.get("crosscheck") == "off"
+        recorded = {e["id"]: e for e in orig.get("queries", [])
+                    if isinstance(e, dict)}
+        orig_ids = prov.get("query_ids") or list(recorded)
+
+        # resolve the queries to rescore (run set, or --ids subset) against
+        # the CURRENT spec, rejecting ids that cannot be scored faithfully
+        want = [i.strip() for i in args.ids.split(",")] if args.ids \
+            else orig_ids
+        by_id = {q["id"]: q for q in queries}
+        resolved = []
+        for i in want:
+            rec = recorded.get(i)
+            if rec is None:
+                resolved.append({"id": i, "class": None, "query": "",
+                                 "_unresolved": True,
+                                 "_reason": "not part of this run"})
+                continue
+            cur = by_id.get(i)
+            if cur is None:
+                resolved.append({"id": i, "class": None, "query": "",
+                                 "_unresolved": True,
+                                 "_reason": "missing from queries spec"})
+                continue
+            if rec.get("query") and rec["query"] != cur["query"]:
+                resolved.append({"id": i, "class": cur.get("class"),
+                                 "query": cur["query"], "_unresolved": True,
+                                 "_reason": "query text drifted since the run"})
+                continue
+            if rec.get("class") and rec["class"] != cur.get("class"):
+                resolved.append({"id": i, "class": cur.get("class"),
+                                 "query": cur["query"], "_unresolved": True,
+                                 "_reason": "query class drifted since the run"})
+                continue
+            resolved.append(cur)
+
+        # A5 judgements must be bound to this exact run's sample
+        relevance_list = None
+        if args.relevance:
+            judgements, sha = read_keyed_relevance(args.relevance)
+            err = relevance_binding_error(sha, run_dir / "relevance-sample.json")
+            if err:
+                p.error(f"relevance rejected: {err}")
+            relevance_list = judgements
+        return _rescore_main(run_dir, resolved, gold_dir, judge_enabled,
+                             relevance_list, args.no_crosscheck or nocc_orig,
+                             args.cap_usd)
+
+    # execute path: --relevance is a plain 0/1 list (no sample to bind)
+    relevance = None
+    if args.relevance:
+        try:
+            relevance = parse_relevance(args.relevance)
+        except ValueError as e:
+            p.error(str(e))
 
     arm = "nocc" if args.no_crosscheck else "cc"
     run_id = args.run_id or f"{arm}-{datetime.datetime.now():%Y%m%d-%H%M%S}"

@@ -9,7 +9,8 @@ judgements feed the benchmark driver's ``--relevance`` file.
 Usage:
     python3 bench/collect_relevance.py --run-dir out/bench/cc-judge2
     # reads the sample (relevance-sample.json) + fills relevance-judgements.json
-    # (replace each null with 0 or 1, keep order), then score THE SAME run:
+    # (a keyed object; replace each null inside "judgements" with 0 or 1,
+    # keep order — the sample_sha binds these labels to this run), then:
     python3 bench/run_benchmark.py --rescore out/bench/cc-judge2 --relevance out/bench/cc-judge2/relevance-judgements.json
 
 Sampling is deterministic (query order from bench/queries.json, then
@@ -20,6 +21,7 @@ regardless of within-claim evidence order.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -175,12 +177,16 @@ def main() -> int:
               f"— judgements would describe different sources. Rerun with "
               f"--force to reset them.", file=sys.stderr)
         return 1
+    sample_text = json.dumps(entries, indent=2, ensure_ascii=False)
+    sample_sha = hashlib.sha1(sample_text.encode("utf-8")).hexdigest()[:16]
     if action == "preserve":
         print(f"[collect] sample unchanged — keeping filled "
               f"{judgements_out}", file=sys.stderr)
     else:
-        judgements_out.write_text(json.dumps([None] * len(entries), indent=2))
-    sample_out.write_text(json.dumps(entries, indent=2, ensure_ascii=False))
+        judgements_out.write_text(json.dumps(
+            {"sample_sha": sample_sha, "judgements": [None] * len(entries)},
+            indent=2))
+    sample_out.write_text(sample_text)
     print(f"[collect] sample ({len(entries)} sources): {sample_out}")
     print(f"[collect] judgements to fill (null -> 0/1, keep order): "
           f"{judgements_out}")

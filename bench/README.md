@@ -13,13 +13,18 @@ deepseek-chat backend (`.env`), and spend real money.
   `out/bench/<run-id>/scorecard.json`.
 - `collect_relevance.py` — A5 rubric-sample collector (owner-run, no LLM):
   extracts ~2 sub-questions × top sources per query from a run's ledgers
-  into `relevance-sample.json` + a null-filled `relevance-judgements.json`
-  you mark 0/1 (keep order). Filled files are preserved across reruns
-  (--force resets). Latest run is picked by scorecard mtime, not name.
+  into `relevance-sample.json` + a keyed, null-filled
+  `relevance-judgements.json` ({sample_sha, judgements}) you mark 0/1 (keep
+  order inside judgements). The sample_sha binds labels to this exact run —
+  rescore rejects mismatched or un-keyed files. Filled files are preserved
+  across reruns (--force resets); malformed files abort. Latest run is
+  picked by scorecard mtime, not name.
 - `run_benchmark.py --rescore <run-dir>` — score an EXISTING run (no new
   missions): re-applies gold + judge + `--relevance` judgements and writes
-  `scorecard-rescore.json`. Relevance judgements MUST be scored against the
-  run whose sources produced them, so A5 always goes through --rescore. Every invocation gets its own
+  `scorecard-rescore.json`. Requires the run's scorecard.json; rejects query
+  ids that drifted (text/class) or are missing from the spec; judge spend
+  respects --cap-usd; nocc runs stay advisory; relevance judgements MUST be
+  sha-bound to this run's sample (keyed file from collect_relevance.py). Every invocation gets its own
   `<run-id>/` subdir (default `cc|nocc-<timestamp>`, or pass `--run-id`) so
   the paired/determinism arms never clobber each other's scorecard, ledgers,
   or `llm.log` (and each arm's cost meters only its own traffic).

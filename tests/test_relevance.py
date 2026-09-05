@@ -97,11 +97,26 @@ def test_judgements_action_requires_force_on_sample_change():
 
 
 def test_relevance_binding_error(tmp_path):
-    from bench.run_benchmark import relevance_binding_error
+    from bench.run_benchmark import relevance_binding_error, read_keyed_relevance
+    import hashlib as _h
     sample = tmp_path / "relevance-sample.json"
-    sample.write_text(json.dumps([{"url": "a"}, {"url": "b"}]))
-    assert relevance_binding_error(2, sample) is None
-    assert "do not match" in relevance_binding_error(1, sample)
-    assert relevance_binding_error(2, tmp_path / "missing.json") is not None
-    (tmp_path / "bad.json").write_text("{nope")
-    assert relevance_binding_error(2, tmp_path / "bad.json") is not None
+    sample_text = json.dumps([{"url": "a"}, {"url": "b"}])
+    sample.write_text(sample_text)
+    sha = _h.sha1(sample_text.encode()).hexdigest()[:16]
+    assert relevance_binding_error(sha, sample) is None
+    assert "do not match" in relevance_binding_error("deadbeef", sample) \
+        or "does not" in relevance_binding_error("deadbeef", sample)
+    assert "not bound" in relevance_binding_error(None, sample)
+    assert relevance_binding_error(sha, tmp_path / "missing.json") is not None
+    # keyed reader: valid object, plain list, and garbage
+    (tmp_path / "k.json").write_text(json.dumps(
+        {"sample_sha": sha, "judgements": [0, 1]}))
+    vals, got_sha = read_keyed_relevance(tmp_path / "k.json")
+    assert vals == [0, 1] and got_sha == sha
+    (tmp_path / "p.json").write_text(json.dumps([1, 1]))
+    vals, got_sha = read_keyed_relevance(tmp_path / "p.json")
+    assert vals == [1, 1] and got_sha is None
+    (tmp_path / "bad.json").write_text(json.dumps([0, 2]))
+    import pytest as _pytest
+    with _pytest.raises(ValueError):
+        read_keyed_relevance(tmp_path / "bad.json")
