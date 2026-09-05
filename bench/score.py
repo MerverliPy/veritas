@@ -45,20 +45,21 @@ CONFIDENCE_ORDER = ["high", "medium", "low", "unsupported"]
 CLASSES = ("F", "C", "D", "U")
 
 # Truth-critical disagreement: token overlap alone must never certify a
-# claim that contradicts gold on years or polarity ("1958" vs "1957",
-# "did not launch" vs "launched"). These markers are 3 chars or digits and
-# would otherwise fall out of the significant-token set. Counts (150
-# countries, 200,000 machines) are left to lexical overlap: a claim that
-# omits a gold figure ("affected 150 countries" vs gold "...150 countries
-# in May 2017") is not a contradiction and must still match.
-_YEAR = re.compile(r"\b(?:1[89]\d{2}|20\d{2})\b")
+# claim that contradicts gold on quantities or polarity ("in 1958" vs
+# "1957", "port 444" vs "445", "did not launch" vs "launched"). Digits
+# fall out of the significant-token set, so quantities are compared
+# explicitly: a match is allowed only when either side cites none or one
+# side's quantity set contains the other's (omission tolerated: "150
+# countries" vs gold "...150 countries in May 2017"; contradiction
+# rejected: 1958 vs 1957, 444 vs 445, 100,000/15 vs 200,000/150).
+_QUANTITY = re.compile(r"\d[\d,]*(?:\.\d+)?")
 _NEGATION = re.compile(
     r"\b(?:not|no|never|without|nor|nothing|nobody|nowhere|neither|"
     r"hardly|barely|unlikely)\b")
 
 
-def _years(text: str) -> tuple[str, ...]:
-    return tuple(sorted(set(_YEAR.findall(text))))
+def _quantities(text: str) -> set[str]:
+    return {q.replace(",", "") for q in _QUANTITY.findall(text)}
 
 
 def _negated(text: str) -> bool:
@@ -79,19 +80,20 @@ def _jaccard(a: str, b: str) -> float:
 def best_gold_match(statement: str, expected: list[dict]) -> dict | None:
     """Highest-overlap gold expected claim, if it is a genuine match.
 
-    Overlap must survive truth-critical checks: a claim that cites a
-    different year ("in 1958" vs gold "in 1957") or has opposite polarity
-    ("did not launch" vs "launched") is a different claim and never scores
-    as the gold statement. Ties in overlap resolve toward the less
-    credit-worthy label (contested/incorrect over correct) so ambiguity
+    Overlap must survive truth-critical checks: a claim that contradicts
+    gold on a quantity (different year, different port, different scale) or
+    has opposite polarity ("did not launch" vs "launched") is a different
+    claim and never scores as the gold statement — while a claim that merely
+    omits a gold detail still matches. Ties in overlap resolve toward the
+    less credit-worthy label (contested/incorrect over correct) so ambiguity
     never certifies credit."""
-    syears, sneg = _years(statement), _negated(statement)
+    sq, sneg = _quantities(statement), _negated(statement)
     best, best_sim = None, 0.0
     for exp in expected:
         st = exp["statement"]
-        eyears, eneg = _years(st), _negated(st)
-        if syears and eyears and syears != eyears:
-            continue  # both cite years and they differ
+        eq, eneg = _quantities(st), _negated(st)
+        if sq and eq and not (sq <= eq or eq <= sq):
+            continue  # both cite quantities and neither contains the other
         if sneg != eneg:
             continue  # opposite polarity is a different claim
         sim = _jaccard(statement, st)

@@ -343,7 +343,7 @@ def test_preflight_errors_detects_bad_gold_before_running(tmp_path):
 
 def test_gold_match_rejects_truth_critical_disagreement():
     """Token overlap must never certify a claim that contradicts gold on
-    years or polarity — the whole point of A1/A2 credit."""
+    quantities or polarity — the whole point of A1/A2 credit."""
     from bench.score import best_gold_match
     g1957 = [exp("Sputnik 1 was launched by the Soviet Union in 1957.")]
     assert best_gold_match(
@@ -371,6 +371,18 @@ def test_gold_match_rejects_truth_critical_disagreement():
     scale = [exp("WannaCry affected around 150 countries in May 2017.")]
     assert best_gold_match("WannaCry affected around 150 countries.",
                            scale) is not None
+    # ...but explicitly DISAGREEING quantities never match (neither set
+    # contains the other), even though digits drop out of token overlap
+    port = [exp("EternalBlue sends crafted packets to a vulnerable machine "
+                "over port 445.")]
+    assert best_gold_match("EternalBlue sends crafted packets to a "
+                           "vulnerable machine over port 444.", port) is None
+    assert gold_verdict("EternalBlue sends crafted packets to a vulnerable "
+                        "machine over port 444.", port) != "correct"
+    big = [exp("WannaCry infected roughly 200,000 computers across more "
+               "than 150 countries in May 2017.")]
+    assert best_gold_match("WannaCry infected 100,000 computers across 15 "
+                           "countries.", big) is None
 
 
 def test_real_seed_gold_sheets_pass_preflight():
@@ -418,4 +430,7 @@ def test_atomic_gold_matches_verifier_shaped_claims():
                         expected) == "correct"
     # synonym paraphrase without the gold's 'largely' still matches
     assert gold_verdict("Comets consist of ice and dust.",
+                        expected) == "correct"
+    # phrasing-variant entry covers natural wording like Codex's example
+    assert gold_verdict("Comets are icy bodies made of dust.",
                         expected) == "correct"

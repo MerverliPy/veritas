@@ -50,7 +50,11 @@ scores each mission ledger against the sheet at `bench/gold/<query_id>.json`
   blocked by the year/polarity checks and denied credit.
 - **Completeness**: enumerate the claims a *correct* report would assert
   (the canonical run's supported claims are a good checklist). Gold
-  incompleteness penalizes legitimate claims as unmatched.
+  incompleteness penalizes legitimate claims as unmatched. Add phrasing
+  variants for a central fact when a natural wording would otherwise fall
+  under the Jaccard bar (synonym-heavy: "icy bodies made of dust" vs
+  "consist largely of ice and dust") — each variant is still an audited
+  statement.
 - **Ambiguity order**: when two gold entries could tie for a claim, the
   scorer resolves ties toward the less credit-worthy label
   (contested/incorrect over correct); word entries so one-sided priority

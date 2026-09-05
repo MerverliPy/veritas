@@ -11,6 +11,12 @@
       "note": "Comet composition; independently corroborated."
     },
     {
+      "statement": "Comets are icy bodies made of dust.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Phrasing variant of the composition fact so a natural wording like this matches (synonym-heavy paraphrases can fall under the Jaccard bar)."
+    },
+    {
       "statement": "Asteroids are rocky or metallic bodies.",
       "gold_label": "correct",
       "confidence_class": "high",
