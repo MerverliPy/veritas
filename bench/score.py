@@ -54,7 +54,9 @@ CLASSES = ("F", "C", "D", "U")
 # rejected: 1958 vs 1957, 444 vs 445, 100,000/15 vs 200,000/150).
 _QUANTITY = re.compile(r"\d[\d,]*(?:\.\d+)?")
 # Spelled-out quantities participate in disagreement checks too: 'three
-# months' vs gold 'two months' must reject like 1958 vs 1957.
+# months' vs gold 'two months' must reject like 1958 vs 1957. Named months
+# become month numbers so 'May 2017' vs gold 'April 2017' conflicts while
+# a claim that omits the month still matches.
 _NUMWORD = {
     "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
     "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
@@ -66,10 +68,35 @@ _NUMWORD = {
     "million": "1000000", "billion": "1000000000",
     "hundreds": "100", "thousands": "1000", "millions": "1000000",
     "billions": "1000000000",
+    "january": "1", "february": "2", "march": "3", "april": "4",
+    "may": "5", "june": "6", "july": "7", "august": "8",
+    "september": "9", "october": "10", "november": "11",
+    "december": "12", "jan": "1", "feb": "2", "mar": "3",
+    "apr": "4", "jun": "6", "jul": "7", "aug": "8", "sep": "9",
+    "oct": "10", "nov": "11", "dec": "12",
+}
+# Synonym roles: quantity anchors are normalized so 'machines' vs gold
+# 'computers' (or 'hosts'/'devices'/'systems') compare the same role.
+_ANCHOR_ROLES = {
+    "computer": "computers", "computers": "computers",
+    "machine": "computers", "machines": "computers",
+    "device": "computers", "devices": "computers",
+    "host": "computers", "hosts": "computers",
+    "system": "computers", "systems": "computers",
+    "pc": "computers", "pcs": "computers", "node": "computers",
+    "nodes": "computers",
+    "country": "countries", "countries": "countries",
+    "nation": "countries", "nations": "countries",
 }
 _NEGATION = re.compile(
     r"\b(?:not|no|never|without|nor|nothing|nobody|nowhere|neither|"
     r"hardly|barely|unlikely)\b")
+
+
+def _negation_count(text: str) -> int:
+    """Number of negation markers. Double negation ('did not spread without
+    requiring...') must not collapse to the same polarity as a single 'without'."""
+    return len(_NEGATION.findall(text.lower()))
 
 
 def _quantities(text: str) -> set[str]:
@@ -80,15 +107,19 @@ def _quantities(text: str) -> set[str]:
 
 
 def _quantity_anchors(text: str) -> dict[str, set[str]]:
-    """Map each quantity (digit run or spelled number word) to the content
-    word it modifies — the following non-numeric word, else the preceding
-    one. Role-aware: 'roughly 150 computers' anchors 150 to 'computers', so
-    a claim swapping 150 computers for 200,000 is caught even though
-    {150, 2017} is a subset of gold's {200000, 150, 2017}; 'three months'
-    anchors 3 to 'months' and disagrees with gold's two months."""
+    """Map each quantity (digit run or spelled number/month word) to the role
+    of the content word it modifies — the following non-numeric word, else
+    the preceding one — with synonym roles normalized (machines ==
+    computers). Role-aware: 'roughly 150 computers' anchors 150 to
+    'computers', so a claim swapping 150 machines for 200,000 computers is
+    caught even though {150, 2017} is a subset of gold's
+    {200000, 150, 2017}."""
     words = [(m.group(0), m.start())
              for m in re.finditer(r"[a-z]{3,}", text.lower())]
     anchors: dict[str, set[str]] = {}
+
+    def role(w: str) -> str:
+        return _ANCHOR_ROLES.get(w, w)
 
     def add(val: str, pos: int) -> None:
         nxt = next((w for w, p in words
@@ -97,7 +128,7 @@ def _quantity_anchors(text: str) -> dict[str, set[str]]:
                     if p < pos and w not in _NUMWORD), None)
         anchor = nxt or prv
         if anchor:
-            anchors.setdefault(anchor, set()).add(val)
+            anchors.setdefault(role(anchor), set()).add(val)
 
     low = text.lower()
     for w, v in _NUMWORD.items():
@@ -122,10 +153,6 @@ def _quantity_conflict(statement: str, gold: str) -> bool:
     return False
 
 
-def _negated(text: str) -> bool:
-    return bool(_NEGATION.search(text.lower()))
-
-
 def _sig_tokens(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9_]{4,}", text.lower()))
 
@@ -147,17 +174,17 @@ def best_gold_match(statement: str, expected: list[dict]) -> dict | None:
     that merely omits a gold detail still matches. Ties in overlap resolve
     toward the less credit-worthy label (contested/incorrect over correct)
     so ambiguity never certifies credit."""
-    sq, sneg = _quantities(statement), _negated(statement)
+    sq, sneg = _quantities(statement), _negation_count(statement)
     best, best_sim = None, 0.0
     for exp in expected:
         st = exp["statement"]
-        eq, eneg = _quantities(st), _negated(st)
+        eq, eneg = _quantities(st), _negation_count(st)
         if sq and eq and not (sq <= eq or eq <= sq):
             continue  # disjoint quantity sets: explicit disagreement
         if _quantity_conflict(statement, st):
             continue  # same anchored quantity, different value
         if sneg != eneg:
-            continue  # opposite polarity is a different claim
+            continue  # different negation scope/count is a different claim
         sim = _jaccard(statement, st)
         if sim > best_sim or (
                 sim == best_sim and sim > 0.0 and best is not None

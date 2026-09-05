@@ -538,3 +538,42 @@ def test_f1_positive_patch_delay_claim_matches():
     expected = f1["expected_claims"]
     assert gold_verdict("many organizations left the available MS17-010 patch "
                         "unapplied", expected) == "correct"
+
+
+def test_synonym_quantity_roles_never_swapped():
+    """'150 machines' vs gold '200,000 computers' must reject: anchor roles
+    are normalized (machines -> computers) before comparison."""
+    repo = Path(__file__).resolve().parents[1]
+    f1 = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
+    expected = f1["expected_claims"]
+    assert gold_verdict("WannaCry infected roughly 150 machines across more "
+                        "than 150 countries in May 2017.",
+                        expected) != "correct"
+    assert gold_verdict("WannaCry infected roughly 200,000 machines across "
+                        "more than 150 countries in May 2017.",
+                        expected) == "correct"
+
+
+def test_double_negation_never_certifies_opposite():
+    repo = Path(__file__).resolve().parents[1]
+    f1 = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
+    expected = f1["expected_claims"]
+    # 'did not spread without requiring' states the opposite of the no-click
+    # fact; two negation markers must not collapse to gold's single 'without'
+    assert gold_verdict("WannaCry did not spread without requiring any user "
+                        "interaction.", expected) != "correct"
+    assert gold_verdict("WannaCry spread without requiring any user "
+                        "interaction.", expected) == "correct"
+
+
+def test_conflicting_month_names_rejected():
+    repo = Path(__file__).resolve().parents[1]
+    f1 = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
+    expected = f1["expected_claims"]
+    gold_stmt = "The Shadow Brokers released EternalBlue in April 2017."
+    assert gold_verdict(gold_stmt, expected) == "correct"
+    assert gold_verdict("The Shadow Brokers released EternalBlue in May 2017.",
+                        expected) != "correct"
+    # omitting the month entirely still matches
+    assert gold_verdict("The Shadow Brokers released EternalBlue in 2017.",
+                        expected) == "correct"
