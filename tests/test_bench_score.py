@@ -434,3 +434,66 @@ def test_atomic_gold_matches_verifier_shaped_claims():
     # phrasing-variant entry covers natural wording like Codex's example
     assert gold_verdict("Comets are icy bodies made of dust.",
                         expected) == "correct"
+
+
+def test_quantity_roles_never_swapped():
+    """Role-aware check: '150 computers' must not match gold's '200,000
+    computers' even though {150, 2017} is a subset of gold's quantities."""
+    repo = Path(__file__).resolve().parents[1]
+    g = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
+    expected = g["expected_claims"]
+    scale = "WannaCry infected roughly 200,000 computers across more than " \
+            "150 countries in May 2017."
+    assert gold_verdict(scale, expected) == "correct"          # exact scale
+    assert gold_verdict("WannaCry infected roughly 150 computers across "
+                        "more than 150 countries in May 2017.",
+                        expected) != "correct"                  # role swap
+    assert gold_verdict("WannaCry infected roughly 200,000 computers across "
+                        "more than 150 countries.",
+                        expected) == "correct"                  # omitted year ok
+
+
+def test_variant_does_not_inflate_recall():
+    repo = Path(__file__).resolve().parents[1]
+    c1 = json.loads((repo / "bench" / "gold" / "c1-comet-asteroid.json").read_text())
+    g = gold("C", c1["expected_claims"])
+    # one claim per distinct fact, composition stated in the VARIANT wording
+    stmts = ["Comets are icy bodies made of dust.",   # variant phrasing
+             "Asteroids are rocky or metallic bodies.",
+             "Comets develop a coma and tails as they approach the Sun.",
+             "Both comets and asteroids are leftovers from the formation "
+             "of the Solar System.",
+             "Most asteroids orbit the Sun in the main belt between Mars "
+             "and Jupiter.",
+             "Comets typically travel on more eccentric orbits than "
+             "main-belt asteroids."]
+    claims = [claim(s, verdict="supported", confidence="medium")
+              for s in stmts]
+    m = compute_query_metrics(ledger(claims), g)
+    assert m["recall_gold"] == 1.0, m   # 6 base facts, all covered
+    assert m["recall_gold_n"] == 6      # variant not a 7th denominator entry
+
+
+def test_f1_positive_patch_claim_matches_immune_paraphrase():
+    repo = Path(__file__).resolve().parents[1]
+    f1 = json.loads((repo / "bench" / "gold" / "f1-wannacry.json").read_text())
+    expected = f1["expected_claims"]
+    assert gold_verdict("Systems that had installed the MS17-010 patch, "
+                        "released in March 2017, were immune to "
+                        "EternalBlue-based propagation.", expected) == "correct"
+
+
+def test_preflight_rejects_dangling_variant(tmp_path):
+    from bench.run_benchmark import preflight_errors
+    gold_dir = tmp_path / "gold"
+    gold_dir.mkdir()
+    queries = [{"id": "f1", "class": "F", "query": "q"}]
+    (gold_dir / "f1.json").write_text(json.dumps({
+        "query_id": "f1", "class": "F",
+        "expected_claims": [
+            {"statement": "Base fact one is true.", "gold_label": "correct",
+             "confidence_class": "high"},
+            {"statement": "Base fact one holds.", "variant_of": "No such base.",
+             "gold_label": "correct", "confidence_class": "high"}]}))
+    errs = preflight_errors(queries, gold_dir)
+    assert any("variant_of" in e and "No such base" in e for e in errs)

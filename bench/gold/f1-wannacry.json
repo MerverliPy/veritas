@@ -1,8 +1,8 @@
 {
   "query_id": "f1-wannacry",
   "class": "F",
-  "source_landscape": "Well documented (Wikipedia 'WannaCry ransomware attack', Microsoft MSRC MS17-010/CVE-2017-0144, NSA-leak retrospectives, and the 2026-09-05 canonical run whose supported claims this sheet enumerates). Outbreak May 2017; EternalBlue exploit of SMBv1 patched by MS17-010 (March 2017); roughly 200,000 machines across ~150 countries; kill-switch domain registration halted the spread.",
-  "note": "DRAFT 2026-09-05 — facts checked against web sources by agent; expected_claims enumerate the supported claims of the 2026-09-05 canonical run so a correct report gets credit (gold incompleteness would otherwise penalize legitimate claims as unmatched). Each entry was audited against the public record, not taken on the pipeline's word. OWNER MUST AUDIT before pilot numbers are meaningful.",
+  "source_landscape": "Well documented (Wikipedia 'WannaCry ransomware attack', Microsoft MSRC MS17-010/CVE-2017-0144/0145, NSA-leak retrospectives, technical analyses of EternalBlue internals, and the 2026-09-05 canonical run whose supported claims this sheet enumerates). Outbreak May 2017; EternalBlue exploit of SMBv1 patched by MS17-010 (March 2017); roughly 200,000 machines across ~150 countries; kill-switch domain registration halted the spread.",
+  "note": "DRAFT 2026-09-05 — facts checked against web sources by agent. expected_claims enumerate the supported claims of the 2026-09-05 canonical run atomically (a correct report asserting its own legitimate details must get credit, not a precision penalty). Each entry was audited against the public record, not taken on the pipeline's word; facts are phrased positively (no negation) so polarity checks do not reject equivalent claims. OWNER MUST AUDIT before pilot numbers are meaningful.",
   "expected_claims": [
     {
       "statement": "EternalBlue is an exploit that targets MS17-010, which patches flaws in the Windows SMBv1 protocol.",
@@ -15,6 +15,13 @@
       "gold_label": "correct",
       "confidence_class": "high",
       "note": "NSA origin + Shadow Brokers leak; well documented."
+    },
+    {
+      "statement": "The Shadow Brokers released EternalBlue in April 2017.",
+      "variant_of": "EternalBlue was developed by the United States National Security Agency and was released publicly in April 2017 by a group known as the Shadow Brokers.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Alternate phrasing of the leak fact."
     },
     {
       "statement": "Microsoft released the MS17-010 security update in March 2017, about two months before the WannaCry outbreak.",
@@ -41,6 +48,18 @@
       "note": "The 'why so fast' answer: worm behavior + slow patching."
     },
     {
+      "statement": "WannaCry performed automatic network scanning to find vulnerable machines.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "Worm propagation mechanism; encyclopedic."
+    },
+    {
+      "statement": "WannaCry spread without requiring any user interaction.",
+      "gold_label": "correct",
+      "confidence_class": "high",
+      "note": "No-click worm property; encyclopedic."
+    },
+    {
       "statement": "The spread of WannaCry was halted after a researcher registered the worm's hardcoded kill-switch domain.",
       "gold_label": "correct",
       "confidence_class": "medium",
@@ -53,10 +72,10 @@
       "note": "Ransomware behavior; encyclopedic."
     },
     {
-      "statement": "Systems that had installed the MS17-010 patch, released in March 2017, were not vulnerable to EternalBlue-based propagation.",
+      "statement": "Systems that had installed the MS17-010 patch, released in March 2017, were protected from EternalBlue-based propagation.",
       "gold_label": "correct",
       "confidence_class": "high",
-      "note": "Causal claim about patching."
+      "note": "Causal claim about patching; phrased positively (immune/protected paraphrases match)."
     },
     {
       "statement": "EternalBlue allows an unauthenticated attacker to send crafted packets to a vulnerable machine over port 445.",
@@ -65,16 +84,46 @@
       "note": "Exploit mechanics; documented in technical writeups."
     },
     {
+      "statement": "EternalBlue exploits size parameter mismatches that cause out-of-bounds writes in the Windows kernel memory pool.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Internals detail from technical analyses."
+    },
+    {
+      "statement": "EternalBlue uses a technique called Pool Grooming to manipulate kernel memory.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Internals detail from technical analyses."
+    },
+    {
       "statement": "DoublePulsar is a kernel-level backdoor that can be delivered via EternalBlue.",
       "gold_label": "correct",
       "confidence_class": "medium",
       "note": "Well-documented pairing in technical analyses."
     },
     {
+      "statement": "WannaCry arrived about 28 days after the Shadow Brokers released EternalBlue.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Derived from the leak (14 April) and outbreak (12 May) dates."
+    },
+    {
       "statement": "WannaCry achieved global distribution within hours of its May 2017 outbreak.",
       "gold_label": "correct",
       "confidence_class": "medium",
       "note": "Speed claim consistent with the canonical run."
+    },
+    {
+      "statement": "WannaCry's spread was modeled using an epidemic spread metric known as R0.",
+      "gold_label": "correct",
+      "confidence_class": "low",
+      "note": "Modeling claim from technical writeups rather than a directly observable fact; low gold expectation."
+    },
+    {
+      "statement": "Widespread delays in applying the MS17-010 patch left hundreds of thousands of systems vulnerable to EternalBlue.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Patching-driver scale claim."
     }
   ]
 }

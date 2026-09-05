@@ -62,6 +62,37 @@ def _quantities(text: str) -> set[str]:
     return {q.replace(",", "") for q in _QUANTITY.findall(text)}
 
 
+def _quantity_anchors(text: str) -> dict[str, set[str]]:
+    """Map each quantity to the content word it modifies (the word that
+    follows it, else the word before). Role-aware: 'roughly 150 computers'
+    anchors 150 to 'computers', so a claim swapping 150 computers for
+    200,000 is caught even though {150, 2017} is a subset of gold's
+    {200000, 150, 2017}."""
+    words = [(m.group(0), m.start()) for m in re.finditer(r"[a-z]{3,}",
+                                                          text.lower())]
+    anchors: dict[str, set[str]] = {}
+    for m in _QUANTITY.finditer(text):
+        val = m.group(0).replace(",", "")
+        following = next((w for w, pos in words if pos >= m.end()), None)
+        preceding = next((w for w, pos in reversed(words) if pos < m.start()),
+                         None)
+        anchor = following or preceding
+        if anchor:
+            anchors.setdefault(anchor, set()).add(val)
+    return anchors
+
+
+def _quantity_conflict(statement: str, gold: str) -> bool:
+    """True when both statements quantify the SAME anchored thing with
+    different values (different year after 'in', different port after
+    'port', different count before 'computers')."""
+    sa, ga = _quantity_anchors(statement), _quantity_anchors(gold)
+    for anchor in sa.keys() & ga.keys():
+        if sa[anchor] != ga[anchor]:
+            return True
+    return False
+
+
 def _negated(text: str) -> bool:
     return bool(_NEGATION.search(text.lower()))
 
@@ -81,19 +112,21 @@ def best_gold_match(statement: str, expected: list[dict]) -> dict | None:
     """Highest-overlap gold expected claim, if it is a genuine match.
 
     Overlap must survive truth-critical checks: a claim that contradicts
-    gold on a quantity (different year, different port, different scale) or
-    has opposite polarity ("did not launch" vs "launched") is a different
-    claim and never scores as the gold statement — while a claim that merely
-    omits a gold detail still matches. Ties in overlap resolve toward the
-    less credit-worthy label (contested/incorrect over correct) so ambiguity
-    never certifies credit."""
+    gold on a quantity (different year, port, or count for the same thing)
+    or has opposite polarity ("did not launch" vs "launched") is a
+    different claim and never scores as the gold statement — while a claim
+    that merely omits a gold detail still matches. Ties in overlap resolve
+    toward the less credit-worthy label (contested/incorrect over correct)
+    so ambiguity never certifies credit."""
     sq, sneg = _quantities(statement), _negated(statement)
     best, best_sim = None, 0.0
     for exp in expected:
         st = exp["statement"]
         eq, eneg = _quantities(st), _negated(st)
         if sq and eq and not (sq <= eq or eq <= sq):
-            continue  # both cite quantities and neither contains the other
+            continue  # disjoint quantity sets: explicit disagreement
+        if _quantity_conflict(statement, st):
+            continue  # same anchored quantity, different value
         if sneg != eneg:
             continue  # opposite polarity is a different claim
         sim = _jaccard(statement, st)
@@ -194,17 +227,20 @@ def compute_query_metrics(ledger: dict, gold: dict | None) -> dict:
                       if gold_verdict(c["statement"], expected) == "correct")
         m["precision_supported"] = correct / len(scored) if scored else None
         m["precision_supported_n"] = len(scored)
-        gold_correct = [e for e in expected if e.get("gold_label") == "correct"]
-        # Recall counts only claims the pipeline stands behind: verification
-        # may have rejected (contradicted/unsupported) a gold-correct
-        # statement, and a rejected claim is not coverage.
-        def _asserted_match(e: dict) -> bool:
-            return any(best_gold_match(c["statement"], [e])
+        # Recall counts distinct base facts. A 'variant_of' entry is an
+        # alternate phrasing of a base fact, not a second required fact — it
+        # would otherwise inflate the recall denominator.
+        bases = [e for e in expected
+                 if e.get("gold_label") == "correct" and not e.get("variant_of")]
+        def _covered(base: dict) -> bool:
+            cands = [base] + [v for v in expected
+                              if v.get("variant_of") == base["statement"]]
+            return any(best_gold_match(c["statement"], cands) is not None
                        for c in claims
                        if c["verdict"] in ("supported", "partial"))
-        covered = sum(1 for e in gold_correct if _asserted_match(e))
-        m["recall_gold"] = covered / len(gold_correct) if gold_correct else None
-        m["recall_gold_n"] = len(gold_correct)
+        covered = sum(1 for b in bases if _covered(b))
+        m["recall_gold"] = covered / len(bases) if bases else None
+        m["recall_gold_n"] = len(bases)
     if cls in ("F", "C", "D"):
         m["reliability"] = reliability(claims, gold)
     if cls == "U":

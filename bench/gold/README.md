@@ -50,11 +50,15 @@ scores each mission ledger against the sheet at `bench/gold/<query_id>.json`
   blocked by the year/polarity checks and denied credit.
 - **Completeness**: enumerate the claims a *correct* report would assert
   (the canonical run's supported claims are a good checklist). Gold
-  incompleteness penalizes legitimate claims as unmatched. Add phrasing
-  variants for a central fact when a natural wording would otherwise fall
-  under the Jaccard bar (synonym-heavy: "icy bodies made of dust" vs
-  "consist largely of ice and dust") — each variant is still an audited
-  statement.
+  incompleteness penalizes legitimate claims as unmatched.
+- **Positive phrasing**: state facts positively. A gold entry containing a
+  negation word ("was not vulnerable") flips the polarity check, so an
+  equivalent positive claim ("were immune") would be rejected — phrase
+  immunity/protection facts as "protected from ..." instead.
+- **Variants**: when a natural alternate wording of a *central* fact would
+  fall under the Jaccard bar, add it as a second entry with
+  `"variant_of": "<exact base statement>"`. A variant credits the same
+  fact when matched but never adds to the recall denominator.
 - **Ambiguity order**: when two gold entries could tie for a claim, the
   scorer resolves ties toward the less credit-worthy label
   (contested/incorrect over correct); word entries so one-sided priority
