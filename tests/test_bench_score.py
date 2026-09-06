@@ -1200,6 +1200,11 @@ def test_d2_radio_priority_claims_never_certified():
     assert gold_verdict("Tesla's patent 645,576 for wireless transmission "
                         "was filed in 1897 and allowed in 1900.",
                         expected) == "correct"
+    assert gold_verdict("Tesla's patent 645,576 for wireless transmission "
+                        "was filed in 1897 and approved in 1900.",
+                        expected) == "correct"
+    assert gold_verdict("Tesla's patent 645,576 for wireless transmission "
+                        "was patented in 1900.", expected) == "correct"
     # the claim-16 holding (valid and infringed) is a scored anchor too
     assert gold_verdict("The Supreme Court held claim 16 of Marconi patent "
                         "763,772 valid and infringed.", expected) == "correct"
