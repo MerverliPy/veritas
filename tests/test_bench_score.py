@@ -1126,6 +1126,18 @@ def test_d2_radio_priority_claims_never_certified():
                         "Nikola Tesla patent number 645,576 for a wireless "
                         "transmission system, on an application filed on "
                         "2 September 1897.", expected) == "correct"
+    # the 320 U.S. 1 Stone-anticipation holding is the accurate reading
+    assert gold_verdict("In Marconi Wireless Telegraph Co. of America v. "
+                        "United States (1943), the United States Supreme "
+                        "Court held that the principal tuning claims of "
+                        "Marconi's wireless patent (No. 763,772) were "
+                        "invalid because they were anticipated by an earlier "
+                        "patent of the American inventor John Stone Stone.",
+                        expected) == "correct"
+    # the 'Court declared Tesla the inventor' overclaim must never win credit
+    assert gold_verdict("In 1943 the United States Supreme Court declared "
+                        "Nikola Tesla the inventor of radio.",
+                        expected) != "correct"
 
 
 def test_priority_claim_never_certified_by_patent_fact():
