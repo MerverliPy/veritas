@@ -22,10 +22,10 @@ from bench.score import (
 
 def claim(statement: str, *, verdict: str = "supported",
           confidence: str = "medium", conflicts: list | None = None,
-          crosschecked: bool = False) -> dict:
+          crosschecked: bool = False, subquestion: str = "sq") -> dict:
     return {"id": f"c{hash(statement) & 0xffff}",
             "statement": statement,
-            "subquestion": "sq",
+            "subquestion": subquestion,
             "evidence": [],
             "verdict": verdict,
             "confidence": confidence,
@@ -34,16 +34,17 @@ def claim(statement: str, *, verdict: str = "supported",
             "note": ""}
 
 
-def ledger(claims: list[dict], *, conflicts: list | None = None) -> dict:
+def ledger(claims: list[dict], *, conflicts: list | None = None,
+           gaps: list | None = None) -> dict:
     return {"query": "q", "created_at": "2026-01-01T00:00:00Z",
             "surfaces": ["web"], "confidence_counts": {},
-            "claims": claims, "gaps": [],
+            "claims": claims, "gaps": gaps or [],
             "crosscheck": {},
             "conflicts": conflicts or []}
 
 
-def gold(cls: str, expected: list[dict]) -> dict:
-    return {"query_id": "q", "class": cls,
+def gold(cls: str, expected: list[dict], *, query_id: str = "q") -> dict:
+    return {"query_id": query_id, "class": cls,
             "source_landscape": "test", "expected_claims": expected}
 
 
@@ -149,16 +150,17 @@ def test_structure_only_without_gold():
 # --------------------------------------------------------------------------
 
 def _all_pass_query_metrics():
-    """One F, one U, one D ledger whose combined metrics satisfy A1–A4."""
+    """One F, one U, one D ledger (query ids f1/u1/d1) whose combined metrics
+    satisfy A1–A4 under the re-spec gates (A5/A6 take their own inputs)."""
     f_expected = ([exp(f"Solid fact {i} is well documented.") for i in range(11)]
                   + [exp(f"False claim {i} is not true.", "incorrect")
                      for i in range(4)]
                   + [exp("A twelfth correct fact no claim covers.")])
     f_claims = []
-    # supported-correct: 3 high, 6 medium, 2 low
+    # supported-correct: 3 high (cross-checked), 6 medium, 2 low
     for i in range(3):
         f_claims.append(claim(f"Solid fact {i} is well documented.",
-                              confidence="high"))
+                              confidence="high", crosschecked=True))
     for i in range(3, 9):
         f_claims.append(claim(f"Solid fact {i} is well documented.",
                               confidence="medium"))
@@ -172,18 +174,21 @@ def _all_pass_query_metrics():
     for i in range(2, 4):
         f_claims.append(claim(f"False claim {i} is not true.",
                               verdict="partial", confidence="low"))
-    f = compute_query_metrics(ledger(f_claims), gold("F", f_expected))
+    f = compute_query_metrics(ledger(f_claims),
+                              gold("F", f_expected, query_id="f1"))
     u = compute_query_metrics(
         ledger([claim("Scant trace of an answer.", verdict="unsupported",
                       confidence="unsupported"),
-                claim("Weak hint only.", verdict="partial", confidence="low")]),
-        gold("U", []))
+                claim("Weak hint only.", verdict="partial",
+                      confidence="low")]),
+        gold("U", [], query_id="u1"))
     d = compute_query_metrics(
         ledger([claim("Side A is documented.", verdict="contradicted",
                       confidence="low", conflicts=["Side B is documented."])],
                conflicts=[{"a": "Side A", "b": "Side B"}]),
         gold("D", [exp("Side A is documented.", "contested"),
-                   exp("Side B is documented.", "contested")]))
+                   exp("Side B is documented.", "contested")],
+             query_id="d1"))
     return [f, u, d]
 
 
@@ -203,40 +208,55 @@ def test_recall_excludes_rejected_claims():
     assert compute_query_metrics(partial, g)["recall_gold"] == 1.0
 
 
-def test_gates_all_pass():
-    qm = _all_pass_query_metrics()
-    # paired arm: same precision, zero high claims -> cross-check benefit
+def _nocc_f_metric():
+    """Paired-arm F metric for the SAME query (f1) with zero high claims
+    (no cross-check) — the A4 benefit is the with-arm high_share."""
     f_nocc_claims = [claim(f"Solid fact {i} is well documented.",
                            confidence="medium") for i in range(11)]
-    f_nocc = compute_query_metrics(ledger(f_nocc_claims),
-                                   gold("F", [exp(f"Solid fact {i} "
-                                                   "is well documented.")
-                                               for i in range(11)]))
-    qm_nocc = [f_nocc, qm[1], qm[2]]
+    return compute_query_metrics(
+        ledger(f_nocc_claims),
+        gold("F", [exp(f"Solid fact {i} is well documented.")
+                    for i in range(11)], query_id="f1"))
+
+
+def _stable_reruns(n: int = 3) -> list[list[dict]]:
+    """n reruns of the SAME query with identical confidence distributions and
+    identical sub-question sets — a perfectly deterministic arm."""
+    def _one():
+        return ledger([claim("First stable claim statement here.",
+                             verdict="supported", confidence="medium"),
+                       claim("Second stable claim statement here.",
+                             verdict="supported", confidence="high",
+                             crosschecked=True),
+                       claim("Third weak trace here.", verdict="unsupported",
+                             confidence="unsupported")])
+    return [[_one() for _ in range(n)]]
+
+
+def test_gates_all_pass():
+    qm = _all_pass_query_metrics()
+    # paired arm: same query ids (f1/u1/d1), no high claims -> benefit visible
+    qm_nocc = [_nocc_f_metric(), qm[1], qm[2]]
     g = gates(qm, q_metrics_nocc=qm_nocc,
               relevance_judgements=[1, 1, 1, 0],
-              flip_pairs=[(ledger([claim("First stable claim statement here.",
-                                          verdict="supported"),
-                                   claim("Second stable claim statement here.",
-                                          verdict="partial")]),
-                           ledger([claim("First stable claim statement here.",
-                                          verdict="supported"),
-                                   claim("Second stable claim statement here.",
-                                          verdict="partial")]))])
+              rerun_groups=_stable_reruns())
     assert g["A1_precision_fabrication"]["ok"] is True   # precision 1.0, fab 0
-    assert g["A2_calibration"]["ok"] is True             # 1.0 / 0.75 / 0.5
-    assert g["A3_honest_failure_U"]["ok"] is True        # share 1.0
+    assert g["A2_calibration"]["ok"] is True             # medium 0.75, corr ok
+    assert g["A3_honest_failure_U"]["ok"] is True        # sub-q share 1.0
     assert g["A4_crosscheck_benefit"]["ok"] is True      # fires + delta
     assert g["A5_relevance"]["ok"] is True               # median 1.0
-    assert g["A6_determinism"]["ok"] is True             # flip rate 0
+    assert g["A6_determinism"]["ok"] is True             # dist L1 0 <= 0.30
     assert g["A1_precision_fabrication"]["value"]["precision_supported"] == 1.0
     rel = g["A2_calibration"]["value"]["reliability"]
     assert rel["high"] == 1.0 and abs(rel["medium"] - 0.75) < 1e-9 \
         and rel["low"] == 0.5
     v4 = g["A4_crosscheck_benefit"]["value"]
-    assert v4["all_D_fired"] is True
+    assert v4["n_paired"] == 3
+    assert v4["D_fired_with"] == 1
     assert v4["high_share_with"] > v4["high_share_without"]
-    assert v4["precision_with"] >= v4["precision_without"]
+    assert v4["precision_with"] >= v4["precision_without"] - 0.05
+    assert g["A6_determinism"]["value"]["median_pairwise_l1"] == 0.0
+    assert g["A6_determinism"]["value"]["median_pairwise_subq_jaccard"] == 1.0
 
 
 def test_gates_detect_failures_and_na():
@@ -254,13 +274,37 @@ def test_gates_detect_failures_and_na():
     # A5 fail: poor relevance judgements
     g2 = gates(_all_pass_query_metrics(), relevance_judgements=[0, 0])
     assert g2["A5_relevance"]["ok"] is False
-    # A6 fail: verdict reversal across reruns
-    g3 = gates(_all_pass_query_metrics(),
-               flip_pairs=[(ledger([claim("Kill-switch stopped it.",
+    # A6 fail: divergent confidence distributions across reruns
+    divergent = [[
+        ledger([claim("Same topic claim.", confidence="low")]),
+        ledger([claim("Same topic claim.", confidence="medium")]),
+        ledger([claim("Same topic claim.", confidence="high")]),
+    ]]
+    g3 = gates(_all_pass_query_metrics(), rerun_groups=divergent)
+    assert g3["A6_determinism"]["ok"] is False   # dist L1 > 0.30
+    # A6 statement-level flip_rate is informational: a reversal with NO
+    # rerun groups is not-applicable, not a FAIL (flip is reported, not gated)
+    g3b = gates(_all_pass_query_metrics(),
+                flip_pairs=[(ledger([claim("Kill-switch stopped it.",
                                           verdict="supported")]),
-                            ledger([claim("Kill-switch stopped it.",
+                             ledger([claim("Kill-switch stopped it.",
                                           verdict="contradicted")]))])
-    assert g3["A6_determinism"]["ok"] is False
+    assert g3b["A6_determinism"]["ok"] is None
+    assert g3b["A6_determinism"]["value"]["flip_rate"] == 1.0
+    # A2 fail: corroboration below the floor (cross-check never fired)
+    f_nocorr = compute_query_metrics(
+        ledger([claim("Supported fact zero is well documented.",
+                      confidence="medium", crosschecked=False),
+                claim("Supported fact one is well documented.",
+                      confidence="medium", crosschecked=False)]),
+        gold("F", [exp("Supported fact zero is well documented."),
+                   exp("Supported fact one is well documented.")]))
+    g5 = gates([f_nocorr,
+                compute_query_metrics(
+                    ledger([claim("Nothing found.", verdict="unsupported",
+                                  confidence="unsupported")]),
+                    gold("U", []))])
+    assert g5["A2_calibration"]["ok"] is False       # corr 0.0 < 0.05
     # Not-applicable: no data for a gate -> None, never FAIL
     g4 = gates([_all_pass_query_metrics()[0]])
     assert g4["A3_honest_failure_U"]["ok"] is None
@@ -269,6 +313,168 @@ def test_gates_detect_failures_and_na():
     # A4 without the paired arm is n/a, never PASS on a mainline fire alone
     assert gates(_all_pass_query_metrics())["A4_crosscheck_benefit"]["ok"] \
         is None
+    # A4 with <2 paired same-query pairs is n/a (evaluated at full-run scale)
+    only_one = gates([_all_pass_query_metrics()[0]],
+                     q_metrics_nocc=[_nocc_f_metric()])
+    assert only_one["A4_crosscheck_benefit"]["ok"] is None
+    # A2 with NO populated medium bucket is n/a, not a silent pass
+    u_only = compute_query_metrics(
+        ledger([claim("Trace only.", verdict="unsupported",
+                      confidence="unsupported")]),
+        gold("U", []))
+    assert gates([u_only])["A2_calibration"]["ok"] is None
+
+
+# --------------------------------------------------------------------------
+# re-spec A2/A3/A6 metric behavior
+# --------------------------------------------------------------------------
+
+def test_corroboration_rate_computed_per_query():
+    """Corroboration rate = asserted claims the cross-check saw (crosschecked
+    flag) or that reached high, over asserted claims. Ledger-only, no gold."""
+    l = ledger([claim("A.", confidence="high", crosschecked=True),
+                claim("B.", confidence="medium", crosschecked=True),
+                claim("C.", confidence="medium"),
+                claim("D.", confidence="low"),
+                claim("E.", verdict="unsupported", confidence="unsupported")])
+    m = compute_query_metrics(l, None)
+    assert m["corroborated_n"] == 2          # A + B asserted & crosschecked
+    assert m["asserted_n"] == 4
+    assert abs(m["corroboration_rate"] - 0.5) < 1e-9
+
+
+def test_a3_subquestion_unresolved_semantics():
+    """A U sub-question is honestly unresolved when every claim is
+    (unsupported|low) OR it produced no claims and appears in a gap. A
+    confident medium claim makes its sub-question resolved."""
+    g = gold("U", [])
+    # two sub-questions: sq1 unresolved (all low/un), sq2 resolved (medium)
+    l = ledger([
+        claim("Nothing on sq1.", subquestion="sq1", verdict="unsupported",
+              confidence="unsupported"),
+        claim("Weak trace on sq1.", subquestion="sq1", verdict="partial",
+              confidence="low"),
+        claim("Confident tangent on sq2.", subquestion="sq2",
+              confidence="medium"),
+    ])
+    m = compute_query_metrics(l, g)
+    assert m["subquestion_total_n"] == 2
+    assert m["subquestion_unresolved_n"] == 1
+    assert m["subquestion_unresolved_U"] == 0.5
+
+
+def test_a3_gap_named_subquestion_is_unresolved():
+    """A sub-question that produced no claims and appears in a gap
+    ('no evidence found for: X') counts as honestly unresolved."""
+    g = gold("U", [])
+    l = ledger([claim("Confident tangent.", confidence="medium")],
+               gaps=["no evidence found for: sq-without-claims"])
+    m = compute_query_metrics(l, g)
+    assert m["subquestion_total_n"] == 2       # claim's sq + gap-named sq
+    assert m["subquestion_unresolved_n"] == 1  # the gap-named one
+    assert m["subquestion_unresolved_U"] == 0.5
+
+
+def test_a3_claims_less_u_ledger_registers_gap_subquestions():
+    """A U run that produced NO claims at all still registers gap-named
+    sub-questions as honestly unresolved (the pipeline admitted failure)."""
+    g = gold("U", [])
+    l = ledger([], gaps=["no evidence found for: trieste-1928-tonnage"])
+    m = compute_query_metrics(l, g)
+    assert m["subquestion_total_n"] == 1
+    assert m["subquestion_unresolved_n"] == 1
+    assert m["subquestion_unresolved_U"] == 1.0
+    assert m["unsupported_share_U_n"] == 0  # claim-level has nothing to say
+
+
+def test_normalized_conf_l1_and_subquestion_jaccard():
+    from bench.score import normalized_conf_l1, subquestion_jaccard
+    same_a = ledger([claim("X.", confidence="medium") for _ in range(4)])
+    same_b = ledger([claim("X.", confidence="medium") for _ in range(3)])
+    assert normalized_conf_l1(same_a, same_b) == 0.0
+    diff = ledger([claim("X.", confidence="high") for _ in range(4)])
+    assert normalized_conf_l1(same_a, diff) == 1.0
+    assert normalized_conf_l1(ledger([]), same_b) is None
+    # sub-question set overlap
+    a = ledger([claim("A.", subquestion="q1"),
+                claim("B.", subquestion="q2")])
+    b = ledger([claim("C.", subquestion="q2"),
+                claim("D.", subquestion="q3")])
+    assert subquestion_jaccard(a, b) == 1 / 3
+    assert subquestion_jaccard(ledger([]), b) is None
+
+
+def test_a6_rerun_groups_need_three_and_report_jaccard():
+    """A6 requires >=3 usable reruns of a query; two reruns stay n/a; the
+    median pairwise sub-question Jaccard is reported alongside the gating L1."""
+    # only 2 reruns -> not applicable, never a pass
+    one = _stable_reruns(3)[0][0]
+    two = gates(_all_pass_query_metrics(), rerun_groups=[[one, one]])
+    assert two["A6_determinism"]["ok"] is None
+    assert two["A6_determinism"]["value"]["n_rerun_groups_ge3"] == 0
+
+
+def test_a6_claims_less_rerun_is_not_a_phantom_third():
+    """Codex P1 regression: a claims-less rerun has no confidence
+    distribution, so a 3-ledger group with one empty rerun is only TWO usable
+    runs — A6 must stay n/a, never pass on a phantom third rerun."""
+    one = _stable_reruns(3)[0][0]
+    phantom = gates(_all_pass_query_metrics(),
+                    rerun_groups=[[one, one, ledger([])]])
+    assert phantom["A6_determinism"]["ok"] is None
+    assert phantom["A6_determinism"]["value"]["n_rerun_groups_ge3"] == 0
+    # with three genuinely usable reruns it does gate (and passes)
+    real = gates(_all_pass_query_metrics(), rerun_groups=[[one, one, one]])
+    assert real["A6_determinism"]["ok"] is True
+    assert real["A6_determinism"]["value"]["n_rerun_groups_ge3"] == 1
+
+
+def test_subquestion_jaccard_includes_gap_only_subquestions():
+    """Codex P2 regression: a planned sub-question that found no evidence
+    exists in the plan as a gap, so it must count toward plan overlap —
+    otherwise diverging gap-only plans look identical (Jaccard 1.0)."""
+    from bench.score import subquestion_jaccard
+    a = ledger([claim("A.", subquestion="q1")])
+    b = ledger([claim("B.", subquestion="q1")],
+               gaps=["no evidence found for: q2", "no evidence found for: q3"])
+    assert subquestion_jaccard(a, b) == 1 / 3   # {q1} vs {q1, q2, q3}
+    # a gap-only run has a plan too: overlap with an unrelated claim run is 0
+    gap_only = ledger([], gaps=["no evidence found for: q9"])
+    assert subquestion_jaccard(a, gap_only) == 0.0
+    assert subquestion_jaccard(ledger([]), gap_only) is None  # no plan at all
+
+
+def test_a4_precision_tolerance_and_populations():
+    """A4 (c) allows a 0.05 sample-noise tolerance: with-arm precision
+    0.08 below the without-arm still FAILS; populations are reported."""
+    qm = _all_pass_query_metrics()
+    # with-arm F identical to the all-pass F but with one extra supported
+    # FALSEHOOD: 11 correct of 12 supported -> 0.917 < 1.0 - 0.05, while high
+    # share still beats the without-arm (so only condition (c) fails)
+    f_bad_expected = ([exp(f"Solid fact {i} is well documented.")
+                       for i in range(11)]
+                      + [exp(f"False claim {i} is not true.", "incorrect")
+                         for i in range(4)]
+                      + [exp("A twelfth correct fact no claim covers.")])
+    f_bad_claims = []
+    for i in range(3):
+        f_bad_claims.append(claim(f"Solid fact {i} is well documented.",
+                                  confidence="high", crosschecked=True))
+    for i in range(3, 11):
+        f_bad_claims.append(claim(f"Solid fact {i} is well documented.",
+                                  confidence="medium"))
+    f_bad_claims.append(claim("False claim 0 is not true."))  # supported lie
+    f_bad = compute_query_metrics(
+        ledger(f_bad_claims),
+        gold("F", f_bad_expected, query_id="f1"))
+    qm_bad = [f_bad, qm[1], qm[2]]
+    g = gates(qm_bad, q_metrics_nocc=[_nocc_f_metric(), qm[1], qm[2]])
+    v4 = g["A4_crosscheck_benefit"]["value"]
+    assert v4["placed_with"] == 12 and v4["placed_without"] == 11
+    assert abs(v4["precision_with"] - 11 / 12) < 1e-9
+    assert v4["high_share_with"] > v4["high_share_without"]  # (b) holds
+    # precision 11/12 ~= 0.917 < 1.0 - 0.05 -> A4 fails on (c)
+    assert g["A4_crosscheck_benefit"]["ok"] is False
 
 
 # --------------------------------------------------------------------------
@@ -287,6 +493,508 @@ def test_select_queries_reports_unknown_ids():
     assert unknown == ["nope"]          # caller must reject, never silently drop
     chosen, unknown = select_queries(qs, "nope")
     assert chosen == [] and unknown == ["nope"]
+
+
+def _write_scorecard(run_dir, entries, *, crosscheck="off",
+                     gold_judge="on"):
+    (run_dir / "scorecard.json").write_text(json.dumps(
+        {"provenance": {"crosscheck": crosscheck,
+                         "gold_judge": gold_judge},
+         "queries": entries}))
+
+
+def test_load_paired_metrics_injects_query_id(tmp_path):
+    """A4 paired-arm loader returns ok scored queries' metrics and injects
+    query_id from the scorecard entry when the scorer predates the field."""
+    from bench.run_benchmark import load_paired_metrics
+    arm = tmp_path / "nocc"
+    arm.mkdir()
+    _write_scorecard(arm, [
+        {"id": "f1", "ok": True, "metrics": {"class": "F",
+                                                "precision_supported": 1.0},
+         "query": "q f1", "class": "F"},
+        {"id": "u1", "ok": False, "metrics": {}},   # failed -> excluded
+        {"id": "d1", "ok": True, "metrics": {"class": "D"},
+         "query": "q d1", "class": "D"},
+    ])
+    expected = [{"id": "f1", "query": "q f1", "class": "F"},
+                {"id": "d1", "query": "q d1", "class": "D"}]
+    out = load_paired_metrics(arm, require_crosscheck="off",
+                              require_gold_judge_on=True, expected=expected)
+    assert [m.get("query_id") for m in out] == ["f1", "d1"]
+    assert [m.get("class") for m in out] == ["F", "D"]
+    with pytest.raises(ValueError):
+        load_paired_metrics(tmp_path / "missing")
+
+
+def test_load_paired_metrics_rejects_wrong_arm_or_drift(tmp_path):
+    """Codex: paired metrics must come from the OPPOSITE cross-check arm,
+    the SAME gold-judge mode, and match the main arm's query text/class —
+    unrelated missions, mixed scoring modes, or two enabled arms must never
+    pair into an A4 gate."""
+    from bench.run_benchmark import load_paired_metrics
+    arm = tmp_path / "paired"
+    arm.mkdir()
+    base = [{"id": "f1", "ok": True, "metrics": {"class": "F"},
+             "query": "q f1", "class": "F"}]
+    expected = [{"id": "f1", "query": "q f1", "class": "F"}]
+    # same-arm (crosscheck on) must be rejected when an off-arm is required
+    _write_scorecard(arm, base, crosscheck="on")
+    with pytest.raises(ValueError, match="must be the OTHER arm"):
+        load_paired_metrics(arm, require_crosscheck="off",
+                            require_gold_judge_on=True, expected=expected)
+    # scoring-mode mismatch must be rejected (judge vs lexical precision)
+    _write_scorecard(arm, base, crosscheck="off", gold_judge="off(--no-judge)")
+    with pytest.raises(ValueError, match="gold_judge"):
+        load_paired_metrics(arm, require_crosscheck="off",
+                            require_gold_judge_on=True, expected=expected)
+    # query text drift must be rejected
+    _write_scorecard(arm, base, crosscheck="off")
+    drifted = [{"id": "f1", "query": "a DIFFERENT question", "class": "F"}]
+    with pytest.raises(ValueError, match="text drifted"):
+        load_paired_metrics(arm, require_crosscheck="off",
+                            require_gold_judge_on=True, expected=drifted)
+    # class drift must be rejected
+    cls_drifted = [{"id": "f1", "query": "q f1", "class": "U"}]
+    with pytest.raises(ValueError, match="class drifted"):
+        load_paired_metrics(arm, require_crosscheck="off",
+                            require_gold_judge_on=True, expected=cls_drifted)
+    # a query absent from the main arm must be rejected
+    extra = [{"id": "zz", "ok": True, "metrics": {"class": "F"},
+              "query": "q zz", "class": "F"},
+             {"id": "f1", "ok": True, "metrics": {"class": "F"},
+              "query": "q f1", "class": "F"}]
+    _write_scorecard(arm, extra, crosscheck="off")
+    with pytest.raises(ValueError, match="not in the main"):
+        load_paired_metrics(arm, require_crosscheck="off",
+                            require_gold_judge_on=True, expected=expected)
+
+
+def test_load_paired_metrics_binds_gold_and_scorer_revision(tmp_path):
+    """Codex P1: A4 must never compare a main arm scored under the current
+    gold/scorer against a paired arm scored under older gold/scorer
+    semantics. When gold_dir is supplied the loader requires the paired
+    run's recorded gold_rev == current sheets' revision AND scorer_rev ==
+    the current scorer; stale or unverifiable pairs are rejected loudly."""
+    import bench.run_benchmark as rb
+    gold_dir = tmp_path / "gold"
+    gold_dir.mkdir()
+    _gold_file(gold_dir, "f1")
+    qs = [{"id": "f1", "ok": True, "query": "q f1", "class": "F",
+           "metrics": {"class": "F"}}]
+    expected = [{"id": "f1", "query": "q f1", "class": "F"}]
+
+    def _write(provenance_extra):
+        arm = tmp_path / "nocc"
+        (arm / "scorecard.json").parent.mkdir(parents=True, exist_ok=True)
+        prov = {"crosscheck": "off", "gold_judge": "on"}
+        prov.update(provenance_extra)
+        (arm / "scorecard.json").write_text(json.dumps(
+            {"provenance": prov, "queries": qs}))
+        return arm
+
+    current = rb.gold_revision(gold_dir, ["f1"])
+    # matching gold + scorer -> accepted
+    arm = _write({"scorer_rev": rb.SCORER_REVISION, "gold_rev": current})
+    out = rb.load_paired_metrics(arm, require_crosscheck="off",
+                                 require_gold_judge_on=True,
+                                 expected=expected, gold_dir=gold_dir)
+    assert [m["query_id"] for m in out] == ["f1"]
+    # stale gold (sheet edited since the paired run) -> rejected
+    arm2 = _write({"scorer_rev": rb.SCORER_REVISION,
+                   "gold_rev": current + "ff"})
+    with pytest.raises(ValueError, match="gold revision"):
+        rb.load_paired_metrics(arm2, require_crosscheck="off",
+                               require_gold_judge_on=True,
+                               expected=expected, gold_dir=gold_dir)
+    # older scorer revision -> rejected
+    arm3 = _write({"scorer_rev": "pre-gate-respec", "gold_rev": current})
+    with pytest.raises(ValueError, match="scorer revision"):
+        rb.load_paired_metrics(arm3, require_crosscheck="off",
+                               require_gold_judge_on=True,
+                               expected=expected, gold_dir=gold_dir)
+    # no recorded revisions (pre-binding run) -> rejected, not guessed
+    arm4 = _write({})
+    with pytest.raises(ValueError, match="scorer revision"):
+        rb.load_paired_metrics(arm4, require_crosscheck="off",
+                               require_gold_judge_on=True,
+                               expected=expected, gold_dir=gold_dir)
+
+
+def test_gold_revision_content_sensitive_and_deterministic(tmp_path):
+    """gold_revision hashes sheet content + presence: unchanged sheets give
+    the same revision; an edit or added sheet changes it."""
+    import bench.run_benchmark as rb
+    gold_dir = tmp_path / "gold"
+    gold_dir.mkdir()
+    _gold_file(gold_dir, "f1")
+    _gold_file(gold_dir, "d1", "D")
+    rev1 = rb.gold_revision(gold_dir, ["f1", "d1"])
+    assert rev1 == rb.gold_revision(gold_dir, ["d1", "f1"])  # order-free
+    (gold_dir / "f1.json").write_text(json.dumps({"query_id": "f1",
+                                                   "class": "F",
+                                                   "changed": True}))
+    assert rb.gold_revision(gold_dir, ["f1", "d1"]) != rev1
+    rev2 = rb.gold_revision(gold_dir, ["f1", "d1"])
+    assert rev2 == rb.gold_revision(gold_dir, ["f1", "d1"])  # deterministic
+
+
+def test_load_paired_metrics_prefers_rescore_scorecard(tmp_path):
+    """A paired run that was re-scored (scorecard-rescore.json present) is
+    used instead of the original scorecard — the owner can refresh a stale
+    paired arm under current gold without new paid missions."""
+    import bench.run_benchmark as rb
+    gold_dir = tmp_path / "gold"
+    gold_dir.mkdir()
+    _gold_file(gold_dir, "f1")
+    current = rb.gold_revision(gold_dir, ["f1"])
+    expected = [{"id": "f1", "query": "q f1", "class": "F"}]
+    arm = tmp_path / "paired"
+    arm.mkdir()
+    # stale original scorecard (old gold revision, old scorer)
+    (arm / "scorecard.json").write_text(json.dumps({
+        "provenance": {"crosscheck": "off", "gold_judge": "on",
+                         "scorer_rev": "pre-gate-respec",
+                         "gold_rev": "deadbeef"},
+        "queries": [{"id": "f1", "ok": True, "query": "q f1",
+                      "class": "F", "metrics": {"class": "F"}}]}))
+    # fresh re-score under the current gold/scorer
+    (arm / "scorecard-rescore.json").write_text(json.dumps({
+        "provenance": {"crosscheck": "off", "gold_judge": "on",
+                         "scorer_rev": rb.SCORER_REVISION,
+                         "gold_rev": current},
+        "queries": [{"id": "f1", "ok": True, "query": "q f1",
+                      "class": "F", "metrics": {"class": "F",
+                                                     "precision_supported": 1.0}}]}))
+    out = rb.load_paired_metrics(arm, require_crosscheck="off",
+                                 require_gold_judge_on=True,
+                                 expected=expected, gold_dir=gold_dir)
+    assert out and out[0].get("precision_supported") == 1.0
+
+
+def test_rescore_provenance_records_crosscheck_and_revisions(tmp_path):
+    """A scorecard-rescore.json must be self-describing: it records the
+    ORIGINAL run's crosscheck arm plus the gold/scorer revisions it was
+    rescored under, so it can later serve as a bound paired arm."""
+    import bench.run_benchmark as rb
+    gold_dir = tmp_path / "gold"
+    gold_dir.mkdir()
+    _gold_file(gold_dir, "f1")
+    run_dir = tmp_path / "run"
+    (run_dir / "f1").mkdir(parents=True)
+    (run_dir / "f1" / "ledger.json").write_text(json.dumps(ledger([
+        claim("Fact one is true.")])))
+    queries = [{"id": "f1", "class": "F", "query": "q f1"}]
+    rb._rescore_main(run_dir, queries, gold_dir, judge_enabled=False,
+                     relevance=None, no_crosscheck=False, cap_usd=10.0,
+                     crosscheck="on")
+    sc = json.loads((run_dir / "scorecard-rescore.json").read_text())
+    prov = sc["provenance"]
+    assert prov["crosscheck"] == "on"
+    assert prov["scorer_rev"] == rb.SCORER_REVISION
+    assert prov["gold_rev"] == rb.gold_revision(gold_dir, ["f1"])
+
+
+def _rerun_dir(tmp_path, name, *query_ids, crosscheck="on", ok_ids=None):
+    """Build a realistic determinism run dir: scorecard.json (provenance
+    crosscheck + per-query ok status) plus empty per-query subdirs, matching
+    the layout run_benchmark.py produces. Query ids default to all ok."""
+    d = tmp_path / name
+    for qid in query_ids:
+        (d / qid).mkdir(parents=True, exist_ok=True)
+    ok_ids = query_ids if ok_ids is None else ok_ids
+    (d / "scorecard.json").write_text(json.dumps({
+        "provenance": {"crosscheck": crosscheck},
+        "queries": [{"id": qid, "ok": qid in ok_ids,
+                      "metrics": {}} for qid in query_ids]}))
+    return d
+
+
+def test_collect_rerun_groups_requires_three_same_query_ledgers(tmp_path):
+    """A6 determinism helper groups ledgers per query id; a query needs >=3
+    rerun dirs to form a group; corrupt reruns are skipped, not fatal; a
+    ledger whose scorecard entry is not ok is excluded (Codex)."""
+    from bench.run_benchmark import collect_rerun_groups
+    dirs = []
+    for name in ("det-1", "det-2", "det-3"):
+        d = _rerun_dir(tmp_path, name, "f1", "u1")
+        dirs.append(d)
+    # f1 present in all three; u1 only in two
+    for i, d in enumerate(dirs):
+        (d / "f1" / "ledger.json").write_text(json.dumps(
+            {"claims": [{"statement": f"run {i}", "verdict": "supported",
+                          "confidence": "medium", "subquestion": "q1"}],
+             "query": "q f1",
+             "confidence_counts": {"medium": 1}}))
+        if i < 2:
+            (d / "u1" / "ledger.json").write_text(json.dumps(
+                {"query": "q u1", "claims": [], "confidence_counts": {}}))
+    queries = [{"id": "f1", "query": "q f1"},
+               {"id": "u1", "query": "q u1"}]
+    groups = collect_rerun_groups(dirs, queries)
+    assert len(groups) == 1 and len(groups[0]) == 3      # only f1 qualifies
+    # a corrupt rerun is skipped: f1 drops to 2 usable -> no group forms
+    (dirs[1] / "f1" / "ledger.json").write_text("not json{{")
+    groups2 = collect_rerun_groups(dirs, queries)
+    assert len(groups2) == 0                            # <3 usable reruns
+    # a stale ledger whose scorecard marks the query ok:false is excluded
+    stale = _rerun_dir(tmp_path, "det-4", "f1", ok_ids=())
+    (stale / "f1" / "ledger.json").write_text(json.dumps(
+        {"query": "q f1", "claims": [], "confidence_counts": {"high": 1}}))
+    groups3 = collect_rerun_groups([dirs[0], dirs[1], stale], queries)
+    assert len(groups3) == 0                            # stale never counts
+
+
+def test_collect_rerun_groups_skips_mismatched_query_ledgers(tmp_path):
+    """Codex: a rerun ledger whose embedded query text differs from the
+    expected query is a different mission and must not count toward A6."""
+    from bench.run_benchmark import collect_rerun_groups
+    dirs = []
+    for name in ("det-1", "det-2", "det-3", "det-4"):
+        d = _rerun_dir(tmp_path, name, "f1")
+        dirs.append(d)
+    for i, d in enumerate(dirs):
+        text = "q f1" if i < 3 else "a DIFFERENT question"
+        (d / "f1" / "ledger.json").write_text(json.dumps(
+            {"query": text, "claims": [], "confidence_counts": {"high": 1}}))
+    queries = [{"id": "f1", "query": "q f1"}]
+    groups = collect_rerun_groups(dirs, queries)
+    assert len(groups) == 1 and len(groups[0]) == 3     # mismatched one skipped
+
+
+def test_rerun_dirs_deduplicated_before_three_required(tmp_path):
+    """Codex: passing the same rerun dir three times must NOT satisfy the
+    >=3-distinct-runs requirement (three identical pairwise distances are all
+    zero and would fabricate a determinism pass from one actual run)."""
+    import bench.run_benchmark as rb
+    d = _rerun_dir(tmp_path, "det-1", "f1")
+    (d / "f1" / "ledger.json").write_text(json.dumps(
+        {"query": "q f1", "claims": [], "confidence_counts": {"high": 1}}))
+    from bench.run_benchmark import _load_optional_reruns
+    with pytest.raises(SystemExit):
+        _load_optional_reruns(f"{d},{d},{d}", parser=__import__(
+            "argparse").ArgumentParser(), queries=[{"id": "f1",
+                                                     "query": "q f1"}],
+            require_crosscheck="on")
+    # three genuinely distinct dirs pass the dedupe gate
+    for name in ("det-2", "det-3"):
+        d_other = _rerun_dir(tmp_path, name, "f1")
+        (d_other / "f1" / "ledger.json").write_text(json.dumps(
+            {"query": "q f1", "claims": [], "confidence_counts": {"high": 1}}))
+    groups = _load_optional_reruns(
+        f"{d},{tmp_path / 'det-2'},{tmp_path / 'det-3'}",
+        queries=[{"id": "f1", "query": "q f1"}], require_crosscheck="on")
+    assert groups and len(groups[0]) == 3
+
+
+def test_a4_precisionless_paired_set_is_na_not_fail():
+    """Codex P2: a paired set with a D query but no usable F/C precision
+    population on either arm never measured condition (c) — A4 is n/a, never
+    a FAIL on an unevaluated precision condition."""
+    qm = _all_pass_query_metrics()
+    # paired set = U + D only (no F/C): both precision values are None
+    paired = gates([qm[1], qm[2]], q_metrics_nocc=[qm[1], qm[2]])
+    v4 = paired["A4_crosscheck_benefit"]
+    assert v4["ok"] is None
+    assert v4["value"]["n_paired"] == 2
+    assert v4["value"]["precision_with"] is None
+    assert v4["value"]["precision_without"] is None
+
+
+def test_a4_off_arm_main_run_is_rejected(tmp_path):
+    """Codex: A4's main position must be the cross-check-ON arm. Rescoring a
+    crosscheck=off run with a paired arm would evaluate the deltas in
+    reverse — reject it before any gate is produced."""
+    from bench.run_benchmark import main as _main  # noqa: F401 - CLI guarded
+    # exercise the same guard logic directly via the loader's crosscheck rule:
+    # a nocc main run requires a cc paired arm (off main -> 'on' required),
+    # which the CLI now refuses up front; here we assert the CLI-level
+    # behavior through the validator used by main() by checking the
+    # provenance rejection when the arms do not differ.
+    from bench.run_benchmark import load_paired_metrics
+    arm = tmp_path / "paired"
+    arm.mkdir()
+    _write_scorecard(arm, [{"id": "f1", "ok": True,
+                            "metrics": {"class": "F"},
+                            "query": "q f1", "class": "F"}],
+                     crosscheck="on")
+    expected = [{"id": "f1", "query": "q f1", "class": "F"}]
+    with pytest.raises(ValueError, match="must be the OTHER arm"):
+        # a cc main (require off) paired with this cc arm is rejected
+        load_paired_metrics(arm, require_crosscheck="off",
+                            require_gold_judge_on=True, expected=expected)
+
+
+def test_execute_reuse_drops_stale_rescore_artifact(tmp_path, monkeypatch):
+    """Codex P1: reusing a named run dir must drop a prior
+    scorecard-rescore.json before fresh missions overwrite scorecard.json —
+    the paired-arm loader prefers the rescore artifact, so a stale one would
+    feed A4 metrics from the wrong (older) run."""
+    import sys
+    from bench.run_benchmark import main as _main  # noqa: F401 - CLI guarded
+    run_dir = tmp_path / "full-1"
+    run_dir.mkdir()
+    stale = run_dir / "scorecard-rescore.json"
+    stale.write_text(json.dumps({"provenance": {"crosscheck": "on"}}))
+    assert stale.exists()
+    # Execute path: fresh --no-crosscheck mission with a paired arm is
+    # rejected AFTER the run dir is prepared, so the stale rescore must
+    # already be gone when that error fires (and gone before any new
+    # scorecard.json could be written).
+    monkeypatch.setattr(sys, "argv", [
+        "run_benchmark.py", "--run-id", "full-1",
+        "--out", str(tmp_path),
+        "--no-crosscheck", "--paired-arm", str(tmp_path / "nocc")])
+    with pytest.raises(SystemExit):
+        _main()
+    assert not stale.exists()
+
+
+def test_rescore_rejects_stale_ledger_from_failed_source(tmp_path, monkeypatch):
+    """Codex P1: rescoring a run whose source scorecard marks a query failed
+    (ok:false) must not score the stale ledger.json left behind — a
+    fabricated rescored success would later be treated as authoritative by a
+    paired-arm load."""
+    import sys
+    from bench.run_benchmark import REPO, main as _main  # noqa: F401
+    spec = json.loads((REPO / "bench" / "queries.json").read_text())
+    f1 = next(q for q in spec["queries"] if q["id"] == "f1-wannacry")
+    run_dir = tmp_path / "run"
+    (run_dir / "f1-wannacry").mkdir(parents=True)
+    # stale ledger from an EARLIER successful mission; the latest mission
+    # failed and scorecard.json records ok:false
+    (run_dir / "f1-wannacry" / "ledger.json").write_text(json.dumps({
+        "query": f1["query"], "claims": []}))
+    (run_dir / "scorecard.json").write_text(json.dumps({
+        "provenance": {"crosscheck": "on", "gold_judge": "off"},
+        "queries": [{"id": "f1-wannacry", "ok": False,
+                      "query": f1["query"], "class": f1["class"],
+                      "metrics": {"class": "F"}}]}))
+    monkeypatch.setattr(sys, "argv", ["run_benchmark.py",
+                                      "--rescore", str(run_dir),
+                                      "--ids", "f1-wannacry",
+                                      "--no-judge"])
+    _main()
+    out = json.loads((run_dir / "scorecard-rescore.json").read_text())
+    q = out["queries"][0]
+    assert q["ok"] is False
+    assert "stale ledger" in q["error"]
+    assert q["metrics"] == {}
+
+
+def test_rescore_rejects_missing_crosscheck_provenance(tmp_path, monkeypatch):
+    """Codex P1: rescoring a source scorecard without provenance.crosscheck
+    must abort — defaulting a missing arm to 'on' could rescore an off-arm
+    run as if it were the main arm and fabricate an arm identity in the
+    rescore artifact."""
+    import sys
+    from bench.run_benchmark import main as _main
+    run_dir = tmp_path / "legacy"
+    run_dir.mkdir()
+    # legacy/malformed scorecard: queries scored but no crosscheck provenance
+    (run_dir / "scorecard.json").write_text(json.dumps({
+        "provenance": {"gold_judge": "on"},
+        "queries": [{"id": "f1", "ok": True, "query": "q f1",
+                      "class": "F", "metrics": {"class": "F"}}]}))
+    monkeypatch.setattr(sys, "argv", ["run_benchmark.py",
+                                      "--rescore", str(run_dir),
+                                      "--no-judge"])
+    with pytest.raises(SystemExit):
+        _main()
+
+
+def test_rerun_dirs_without_usable_groups_fail_preflight(tmp_path):
+    """Codex: three distinct but unusable rerun dirs (missing ledgers) must be
+    rejected up front, not silently produce an empty A6 after missions ran."""
+    from bench.run_benchmark import _load_optional_reruns
+    dirs = [tmp_path / f"det-{i}" for i in (1, 2, 3)]  # dirs exist but empty
+    for d in dirs:
+        d.mkdir(exist_ok=True)
+    groups = _load_optional_reruns(
+        ",".join(str(d) for d in dirs),
+        queries=[{"id": "f1", "query": "q f1"}])
+    assert groups == []        # no usable group
+    # the CLI-level guard (not shown here) turns this into parser.error; the
+    # collect function returning [] is what main() rejects on
+
+
+
+def test_rerun_dirs_require_crosscheck_arm_provenance(tmp_path):
+    """Codex P1: rerun dirs must carry a scorecard whose crosscheck arm
+    matches the evaluated run — cross-check promotes medium->high, so mixing
+    arms measures configuration drift, not determinism. Missing or
+    mismatched provenance aborts loudly."""
+    from bench.run_benchmark import _load_optional_reruns
+    import bench.run_benchmark as rb
+
+    d1, d2, d3 = (_rerun_dir(tmp_path, n, "f1", crosscheck="on")
+                  for n in ("det-1", "det-2", "det-3"))
+    for d in (d1, d2, d3):
+        (d / "f1" / "ledger.json").write_text(json.dumps(
+            {"query": "q f1", "claims": [],
+             "confidence_counts": {"high": 1}}))
+    qs = [{"id": "f1", "query": "q f1"}]
+    # all on-arm dirs match an on-arm evaluation
+    groups = _load_optional_reruns(f"{d1},{d2},{d3}", queries=qs,
+                                   require_crosscheck="on")
+    assert groups and len(groups[0]) == 3
+    # a single off-arm dir mixed in aborts loudly (not silently skipped)
+    d4 = _rerun_dir(tmp_path, "det-4", "f1", crosscheck="off")
+    (d4 / "f1" / "ledger.json").write_text(json.dumps(
+        {"query": "q f1", "claims": [], "confidence_counts": {"high": 1}}))
+    parser = __import__("argparse").ArgumentParser()
+    with pytest.raises(SystemExit):
+        _load_optional_reruns(f"{d1},{d2},{d4}", parser=parser, queries=qs,
+                              require_crosscheck="on")
+    # a dir with no scorecard at all is unverifiable -> abort
+    d5 = tmp_path / "det-5"
+    (d5 / "f1").mkdir(parents=True)
+    (d5 / "f1" / "ledger.json").write_text(json.dumps(
+        {"query": "q f1", "claims": [], "confidence_counts": {"high": 1}}))
+    with pytest.raises(SystemExit):
+        _load_optional_reruns(f"{d1},{d2},{d5}", parser=parser, queries=qs,
+                              require_crosscheck="on")
+
+
+def test_rerun_groups_reject_distribution_less_ledgers(tmp_path):
+    """Codex P2: readable ledgers with NO claims and NO confidence counts are
+    not usable reruns — a group of three such ledgers must not pass
+    preflight (an empty distribution would make A6 n/a after paid missions).
+    Ledgers that carry a plan via gap-names still qualify (plan overlap is
+    measured separately from the distribution gate)."""
+    from bench.run_benchmark import collect_rerun_groups
+    dirs = []
+    for name in ("det-1", "det-2", "det-3"):
+        d = _rerun_dir(tmp_path, name, "f1")
+        dirs.append(d)
+    # three distribution-less, plan-less ledgers -> no group
+    for d in dirs:
+        (d / "f1" / "ledger.json").write_text(json.dumps(
+            {"query": "q f1", "claims": [], "confidence_counts": {}}))
+    qs = [{"id": "f1", "query": "q f1"}]
+    assert collect_rerun_groups(dirs, qs) == []
+    # same but each records a gap-named plan -> plan-bearing, so a group forms
+    for d in dirs:
+        (d / "f1" / "ledger.json").write_text(json.dumps(
+            {"query": "q f1", "claims": [], "confidence_counts": {},
+             "gaps": ["no evidence found for: q1"]}))
+    groups = collect_rerun_groups(dirs, qs)
+    assert len(groups) == 1 and len(groups[0]) == 3
+
+
+def test_a6_gap_only_rerun_counts_toward_plan_overlap():
+    """Codex P2: a claims-less rerun that recorded its planned questions as
+    gaps still has a plan — it must contribute to the reported plan-overlap
+    Jaccard (computed independently of the confidence-distribution filter),
+    not be silently dropped from the group."""
+    one = _stable_reruns(1)[0][0]          # two claim-bearing reruns
+    gap_only = ledger([], gaps=["no evidence found for: q1"])
+    g = gates(_all_pass_query_metrics(), rerun_groups=[[one, one, gap_only]])
+    # plan overlap is measured over all three plan-bearing ledgers...
+    assert g["A6_determinism"]["value"]["median_pairwise_subq_jaccard"] \
+        is not None
+    # ...while the distribution gate stays n/a (only two usable distributions)
+    assert g["A6_determinism"]["ok"] is None
 
 
 def test_parse_relevance_accepts_binary_only(tmp_path):

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+from itertools import combinations
 from pathlib import Path
 # Protocol constant shared with bench/judge.py (kept local to avoid an import
 # cycle): a judge OUTAGE that could not place a claim. Scored as not-correct,
@@ -265,6 +266,7 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
     cls = query_class(gold)
     m: dict = {
         "class": cls,
+        "query_id": gold.get("query_id") if gold else None,
         "n_claims": len(claims),
         "verdict_counts": _counts(claims, "verdict"),
         "confidence_counts": _counts(claims, "confidence"),
@@ -273,6 +275,8 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
         "crosschecked": sum(1 for c in claims if c.get("crosschecked")),
         "asserted_n": 0,          # claims the pipeline stands behind
         "high_asserted_n": 0,     # asserted + confidence high (cross-check win)
+        "corroborated_n": 0,      # asserted + crosschecked/high (A2 finding)
+        "corroboration_rate": None,
         "judge_counts": {},       # judge label distribution when judging
         # default nulls
         "precision_supported": None, "precision_supported_n": 0,
@@ -281,6 +285,9 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
         "reliability": {"high": None, "high_n": 0, "medium": None,
                         "medium_n": 0, "low": None, "low_n": 0},
         "unsupported_share_U": None, "unsupported_share_U_n": 0,
+        "subquestion_unresolved_U": None,  # re-spec A3 (sub-question level)
+        "subquestion_unresolved_n": 0,
+        "subquestion_total_n": 0,
         "fabrication_U": None,
         "contradiction_fires_D": None,
     }
@@ -288,7 +295,19 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
     m["asserted_n"] = len(asserted)
     m["high_asserted_n"] = sum(1 for c in asserted
                                 if c["confidence"] == "high")
+    # Corroboration rate (re-spec A2 finding): share of asserted claims the
+    # independent cross-check pass saw (crosschecked flag) or that reached
+    # high confidence (the cross-check win). Ledger-only; no gold needed.
+    m["corroborated_n"] = sum(1 for c in asserted
+                               if c.get("crosschecked")
+                               or c.get("confidence") == "high")
+    m["corroboration_rate"] = (m["corroborated_n"] / len(asserted)
+                                if asserted else None)
     if gold is None or not claims:
+        # A claims-less U ledger still registers gap-named sub-questions as
+        # honestly unresolved (re-spec A3) — the pipeline admitted failure.
+        if cls == "U" and gold is not None:
+            _subquestion_honest_failure(m, ledger)
         return m
 
     expected = gold.get("expected_claims", [])
@@ -370,12 +389,46 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
         m["fabrication_U"] = sum(
             1 for c in asserted
             if c["verdict"] == "supported" and c["confidence"] == "high")
+        _subquestion_honest_failure(m, ledger)
     if cls == "D":
         # conflict pairs recorded on claims (ledger keeps report-level
         # conflicts inside claim.conflicts when reconciled) or as top-level.
         fires = m["conflict_pairs"] + len(ledger.get("conflicts", []))
         m["contradiction_fires_D"] = 1 if fires else 0
     return m
+
+
+def _subquestion_honest_failure(m: dict, ledger: dict) -> None:
+    """Re-spec A3: honest failure at SUB-QUESTION level. A U sub-question is
+    honestly unresolved when every claim attached to it is (unsupported|low)
+    — the pipeline did not confidently assert the asked quantity — or it
+    produced no claims and is named in a gap (runner emits 'no evidence found
+    for: <sub.text>'). The universe is the recoverable one: sub-questions that
+    produced claims (their text rides on each claim) plus gap-named ones.
+    Judge off-topic labeling of U claims is the documented optional
+    refinement (U claims are not judged today); until then confidence
+    low/unsupported is the signal. Mutates ``m`` in place; safe for
+    claims-less U ledgers (gap-named sub-questions still register)."""
+    claims = ledger.get("claims", [])
+    by_sq: dict[str, list[dict]] = {}
+    for c in claims:
+        key = (c.get("subquestion") or "").strip()
+        by_sq.setdefault(key, []).append(c)
+    gap_named = _gap_named_subquestions(ledger)
+    names = set(by_sq) | {g for g in gap_named if g}
+    unresolved = 0
+    for name in names:
+        cs = by_sq.get(name, [])
+        if not cs:
+            unresolved += 1            # zero claims, gap-named
+        elif all(c.get("confidence") in ("low", "unsupported")
+                 for c in cs):
+            unresolved += 1
+    total = len(names)
+    m["subquestion_unresolved_n"] = unresolved
+    m["subquestion_total_n"] = total
+    m["subquestion_unresolved_U"] = (unresolved / total if total
+                                      else None)
 
 
 def _counts(items: list[dict], key: str) -> dict:
@@ -418,6 +471,80 @@ def _pair_claims(ca: list[dict], cb: list[dict]) -> list[tuple[dict, dict]]:
     return pairs
 
 
+def _confidence_proportions(ledger: dict) -> dict[str, float] | None:
+    """Normalized confidence-count distribution over CONFIDENCE_ORDER for a
+    rerun ledger. Real ledgers carry ``confidence_counts``; when absent
+    (tests, hand-built ledgers) the counts are derived from claims' own
+    confidence field. Returns None when the run has no claims to form a
+    distribution."""
+    cc = ledger.get("confidence_counts")
+    if not isinstance(cc, dict) or not any(cc.get(k) for k in CONFIDENCE_ORDER):
+        cc = _counts(ledger.get("claims", []), "confidence")
+    total = sum(cc.get(k, 0) for k in CONFIDENCE_ORDER)
+    if total <= 0:
+        return None
+    return {k: cc.get(k, 0) / total for k in CONFIDENCE_ORDER}
+
+
+def has_usable_distribution(ledger: dict) -> bool:
+    """True when the ledger can contribute to the A6 confidence-distance
+    gate (it carries a usable confidence-count distribution). Claims-less
+    reruns return False — they must never count toward the >=3 rerun
+    minimum that the distribution gate needs."""
+    return _confidence_proportions(ledger) is not None
+
+
+def plan_subquestions(ledger: dict) -> set[str]:
+    """The run's plan as a sub-question set: claim-backed sub-questions plus
+    gap-named ones (a planned sub-question that found no evidence still
+    exists in the plan). Shared by the A3 honest-failure universe, the A6
+    plan-overlap Jaccard, and the rerun-collector's usability test."""
+    named = {c.get("subquestion", "").strip()
+             for c in ledger.get("claims", [])
+             if (c.get("subquestion") or "").strip()}
+    named |= {g for g in _gap_named_subquestions(ledger) if g}
+    return named
+
+
+def normalized_conf_l1(ledger_a: dict, ledger_b: dict) -> float | None:
+    """Normalized L1 (total-variation distance) between two reruns'
+    confidence-count distributions, in [0, 1] (0 = identical distributions).
+    None when either run has no claims. This is re-spec A6(a)."""
+    pa, pb = _confidence_proportions(ledger_a), _confidence_proportions(ledger_b)
+    if pa is None or pb is None:
+        return None
+    return 0.5 * sum(abs(pa[k] - pb[k]) for k in CONFIDENCE_ORDER)
+
+
+def _gap_named_subquestions(ledger: dict) -> list[str]:
+    """Sub-question texts the runner recorded as finding no evidence
+    (``gaps = ["no evidence found for: <sub.text>"]``) — a planned
+    sub-question that produced no claims. Shared by the A3 honest-failure
+    universe and the A6 plan-overlap sets so both see the same plan."""
+    return [
+        g.split("no evidence found for: ", 1)[1].strip()
+        for g in ledger.get("gaps", [])
+        if g.startswith("no evidence found for: ")
+    ]
+
+
+def subquestion_jaccard(ledger_a: dict, ledger_b: dict) -> float | None:
+    """Jaccard of the two reruns' sub-question statement sets (plan overlap,
+    re-spec A6(b)). The universe includes both claim-backed sub-questions and
+    gap-named ones (a planned sub-question that found no evidence still
+    exists in the plan). None when either run has no sub-question text."""
+    def _sq(ledger: dict) -> set[str]:
+        named = {c.get("subquestion", "").strip()
+                 for c in ledger.get("claims", [])
+                 if (c.get("subquestion") or "").strip()}
+        named |= {g for g in _gap_named_subquestions(ledger) if g}
+        return named
+    sa, sb = _sq(ledger_a), _sq(ledger_b)
+    if not sa or not sb:
+        return None
+    return len(sa & sb) / len(sa | sb)
+
+
 # --------------------------------------------------------------------------
 # Gates (spec §6) — value may be None (not applicable) for a metric.
 # --------------------------------------------------------------------------
@@ -433,32 +560,101 @@ def _median(values: list[float]) -> float | None:
 def gates(q_metrics: list[dict], *,
           q_metrics_nocc: list[dict] | None = None,
           relevance_judgements: list[int] | None = None,
-          flip_pairs: list[tuple[dict, dict]] | None = None) -> dict:
+          flip_pairs: list[tuple[dict, dict]] | None = None,
+          rerun_groups: list[list[dict]] | None = None) -> dict:
     """A1–A6 over the per-query metric list. Each gate:
     {ok: bool|None (None = not applicable), value, detail}.
 
-    ``q_metrics`` is the mainline (cross-check on) arm; A4 additionally needs
-    ``q_metrics_nocc`` (the paired cross-check-off arm) and stays ``None``
-    without it — a mainline-only contradiction fire is not the A4 gate."""
+    Re-spec semantics (spec §13, owner-approved 2026-09-06):
+    - A2 gates POPULATED buckets only: medium >= 0.70 AND medium >= low when
+      low is sampled; low has no floor; high reliability is REPORTED only (a
+      near-empty high bucket is a documented limitation, not a silent pass).
+      A new corroboration-rate finding (asserted & crosschecked/high) gates
+      at >= 0.05 so a working cross-check pass is observable.
+    - A3 measures U honest failure at SUB-QUESTION level: a sub-question is
+      honestly unresolved when every claim attached is (unsupported|low) or
+      it produced no claims and appears in a gap; gate >= 0.6 of U
+      sub-questions.
+    - A4 evaluates ONLY on same-query paired arms (>= 2 paired queries,
+      matched by query_id): (a) contradiction fires on >= half the paired D
+      queries in the with-arm, (b) with-arm high_share > without-arm
+      high_share, (c) with-arm precision >= without-arm precision - 0.05
+      tolerance. Placed-claim populations are reported so a confounded pair
+      is visible.
+    - A6 is distribution-level determinism over >= 3 reruns of a query
+      (``rerun_groups``): median pairwise normalized L1 of confidence-count
+      distributions <= 0.30 gates; median pairwise sub-question Jaccard
+      >= 0.40 is reported; statement-level ``flip_rate`` (via
+      ``flip_pairs``) stays informational.
+
+    ``q_metrics`` is the mainline (cross-check on) arm."""
     fc = [m for m in q_metrics if m.get("class") in ("F", "C")
           and m.get("precision_supported_n")]
     prec = (sum(m["precision_supported"] * m["precision_supported_n"]
                 for m in fc) / sum(m["precision_supported_n"] for m in fc)
             if fc else None)
 
-    u = [m for m in q_metrics if m.get("class") == "U"
-         and m.get("unsupported_share_U_n")]
-    u_share = (sum(m["unsupported_share_U"] * m["unsupported_share_U_n"]
-                   for m in u) / sum(m["unsupported_share_U_n"] for m in u)
-               if u else None)
     fab = sum((m["fabrication_U"] or 0) for m in q_metrics
               if m.get("class") == "U")
+    u_present = any(m.get("class") == "U" for m in q_metrics)
 
-    d = [m for m in q_metrics if m.get("class") == "D"]
-    d_fire = (all(m["contradiction_fires_D"] for m in d) if d else None)
+    # A1 needs both halves to be assessable: precision on F/C and fabrication
+    # on U. Either half missing -> not applicable (None), never a silent pass.
+    a1_ok = None if (prec is None or not u_present) \
+        else (prec >= 0.90 and fab == 0)
 
-    # A4 needs BOTH arms: contradiction fires on the mainline run AND the
-    # cross-check benefit delta (with vs without). No paired data -> None.
+    # ---- A2: populated-bucket calibration + corroboration floor -----------
+    rel = {b: (sum(m["reliability"].get(b) * m["reliability"].get(f"{b}_n", 0)
+                   for m in q_metrics
+                   if m["reliability"].get(f"{b}_n"))
+                / sum(m["reliability"].get(f"{b}_n", 0) for m in q_metrics
+                      if m["reliability"].get(f"{b}_n"))
+                if any(m["reliability"].get(f"{b}_n") for m in q_metrics)
+                else None)
+           for b in ("high", "medium", "low")}
+    rel_n = sum(m["reliability"].get(f"{b}_n", 0)
+                for m in q_metrics for b in ("high", "medium", "low"))
+    med_n = sum(m["reliability"].get("medium_n", 0) for m in q_metrics)
+    low_n = sum(m["reliability"].get("low_n", 0) for m in q_metrics)
+    high_n = sum(m["reliability"].get("high_n", 0) for m in q_metrics)
+
+    # Corroboration rate: share of asserted claims the cross-check pass saw
+    # (crosschecked flag) or that reached high (the cross-check win).
+    asserted_total = sum(m.get("asserted_n", 0) for m in q_metrics)
+    corr_n = sum(m.get("corroborated_n", 0) for m in q_metrics)
+    corr_rate = (corr_n / asserted_total) if asserted_total else None
+
+    # Gate on POPULATED buckets: medium must be sampled; low is reported
+    # with no floor (ordering only checked when low is sampled).
+    rel_ok = None
+    if rel_n and med_n:
+        med = rel["medium"]
+        ok = (med is not None and med >= 0.70)
+        if low_n:
+            ok = ok and rel["low"] is not None and med >= rel["low"]
+        if corr_rate is not None:
+            ok = ok and corr_rate >= 0.05
+        rel_ok = ok
+    high_note = ("high bucket near-empty (n=%d): high reliability is reported "
+                 "only until cross-check corroboration improves" % high_n
+                 if high_n == 0 else "")
+
+    # ---- A3: U honest failure at sub-question level -----------------------
+    u_sub = [m for m in q_metrics if m.get("class") == "U"
+             and m.get("subquestion_total_n")]
+    unres_n = sum(m.get("subquestion_unresolved_n", 0) for m in u_sub)
+    total_n = sum(m.get("subquestion_total_n", 0) for m in u_sub)
+    u_share = (unres_n / total_n) if total_n else None
+    # claim-level share stays informational alongside the sub-question metric
+    u_cl = [m for m in q_metrics if m.get("class") == "U"
+            and m.get("unsupported_share_U_n")]
+    cl_share = (sum(m["unsupported_share_U"] * m["unsupported_share_U_n"]
+                    for m in u_cl)
+                / sum(m["unsupported_share_U_n"] for m in u_cl)
+                if u_cl else None)
+    a3_ok = None if not u_sub else (u_share is not None and u_share >= 0.60)
+
+    # ---- A4: same-query paired cross-check benefit ------------------------
     def _fc_prec(ms: list[dict]) -> float | None:
         f = [m for m in ms if m.get("class") in ("F", "C")
              and m.get("precision_supported_n")]
@@ -471,53 +667,99 @@ def gates(q_metrics: list[dict], *,
         hn = sum(m.get("high_asserted_n", 0) for m in ms)
         return (hn / an) if an else None
 
-    prec_nocc = _fc_prec(q_metrics_nocc) if q_metrics_nocc is not None else None
-    hs_with = _high_share(q_metrics)
-    hs_nocc = _high_share(q_metrics_nocc) if q_metrics_nocc is not None else None
-    delta_ok = None
-    if q_metrics_nocc is not None and d and hs_with is not None \
-            and hs_nocc is not None:
-        delta_ok = (d_fire is True and prec_nocc is not None
-                    and prec is not None and prec >= prec_nocc
-                    and hs_with > hs_nocc)
-    a4_ok = None if q_metrics_nocc is None else delta_ok
+    def _placed(ms: list[dict]) -> int:
+        return sum(m.get("precision_supported_n", 0) for m in ms
+                   if m.get("class") in ("F", "C"))
 
-    rel = {b: (sum(m["reliability"].get(b) * m["reliability"].get(f"{b}_n", 0)
-                   for m in q_metrics
-                   if m["reliability"].get(f"{b}_n"))
-                / sum(m["reliability"].get(f"{b}_n", 0) for m in q_metrics
-                      if m["reliability"].get(f"{b}_n"))
-                if any(m["reliability"].get(f"{b}_n") for m in q_metrics)
-                else None)
-           for b in ("high", "medium", "low")}
-    rel_n = sum(m["reliability"].get(f"{b}_n", 0)
-                for m in q_metrics for b in ("high", "medium", "low"))
+    a4_ok = None
+    a4_value: dict = {}
+    if q_metrics_nocc is not None:
+        # Same-query pairing: only queries present in BOTH arms count toward
+        # A4, so an independent-mission population confound is visible (each
+        # arm's placed-claim count is reported), never silently compared.
+        with_by_id = {m.get("query_id"): m for m in q_metrics
+                      if m.get("query_id")}
+        nocc_by_id = {m.get("query_id"): m for m in q_metrics_nocc
+                      if m.get("query_id")}
+        paired_ids = sorted(set(with_by_id) & set(nocc_by_id))
+        pw = [with_by_id[i] for i in paired_ids if i in with_by_id]
+        po = [nocc_by_id[i] for i in paired_ids if i in nocc_by_id]
+        d_paired = [m for m in pw if m.get("class") == "D"]
+        fires = sum(1 for m in d_paired if m.get("contradiction_fires_D"))
+        hs_with, hs_without = _high_share(pw), _high_share(po)
+        pr_with, pr_without = _fc_prec(pw), _fc_prec(po)
+        a4_value = {
+            "n_paired": len(paired_ids),
+            "paired_ids": paired_ids,
+            "n_D_paired": len(d_paired),
+            "D_fired_with": fires,
+            "high_share_with": hs_with,
+            "high_share_without": hs_without,
+            "precision_with": pr_with,
+            "precision_without": pr_without,
+            "placed_with": _placed(pw),
+            "placed_without": _placed(po),
+        }
+        if len(paired_ids) < 2 or not d_paired:
+            a4_ok = None  # under-powered / no D query to fire
+        elif pr_with is None or pr_without is None:
+            # Paired set with no usable F/C precision population on either
+            # arm: the precision condition was never measured -> n/a, never a
+            # FAIL on an unevaluated condition (Codex P2).
+            a4_ok = None
+        else:
+            fires_ok = fires * 2 >= len(d_paired)      # >= half the D queries
+            hs_ok = (hs_with is not None and hs_without is not None
+                     and hs_with > hs_without)
+            pr_ok = pr_with >= pr_without - 0.05
+            a4_ok = fires_ok and hs_ok and pr_ok
 
-    # A2 needs all three buckets sampled; never compare None against a bar.
-    rel_ok = None
-    if rel_n:
-        rel_ok = (
-            rel["high"] is not None and rel["high"] >= 0.85
-            and rel["medium"] is not None and rel["medium"] >= 0.70
-            and rel["low"] is not None
-            and rel["high"] >= rel["medium"] >= rel["low"]
-            and (rel["high"] - rel["low"]) >= 0.15
-        )
-
+    # ---- A5: relevance ----------------------------------------------------
     med = _median([float(j) for j in relevance_judgements]) \
         if relevance_judgements else None
     a5_ok = None if med is None else med >= 0.70
 
+    # ---- A6: distribution-level determinism -------------------------------
     flips: list[float | None] = []
     if flip_pairs:
         flips = [flip_rate(a, b) for a, b in flip_pairs]
         flips = [f for f in flips if f is not None]
-    flip = max(flips) if flips else None
-    a6_ok = None if flip is None else flip == 0.0
+    flip = max(flips) if flips else None   # informational only
 
-    # A1 needs both halves to be assessable: precision on F/C and fabrication
-    # on U. Either half missing -> not applicable (None), never a silent pass.
-    a1_ok = None if (prec is None or not u) else (prec >= 0.90 and fab == 0)
+    l1_vals: list[float] = []
+    jac_vals: list[float] = []
+    n_groups_ge3 = 0
+    for group in rerun_groups or []:
+        # L1 (the gate) needs >=3 reruns with a usable confidence
+        # distribution. A claims-less rerun has no distribution and must not
+        # count toward that minimum (a phantom third would fabricate a pass).
+        usable = [ledger for ledger in group
+                  if has_usable_distribution(ledger)]
+        if len(usable) >= 3:
+            n_groups_ge3 += 1
+            for a, b in combinations(usable, 2):
+                d = normalized_conf_l1(a, b)
+                if d is not None:
+                    l1_vals.append(d)
+        # Plan-overlap Jaccard is a REPORTED diagnostic over >=3 plan-bearing
+        # reruns (the same rerun minimum as the distribution gate). It is
+        # computed over ALL plan-bearing ledgers in the group — including a
+        # claims-less rerun that recorded its planned questions as gaps.
+        # Dropping it (filtering by the confidence distribution first) would
+        # hide a measurable plan-overlap signal whenever a rerun honestly
+        # found no evidence (Codex P2).
+        plan_bearing = [ledger for ledger in group
+                        if plan_subquestions(ledger)]
+        if len(plan_bearing) >= 3:
+            for a, b in combinations(plan_bearing, 2):
+                j = subquestion_jaccard(a, b)
+                if j is not None:
+                    jac_vals.append(j)
+    med_l1 = _median(l1_vals) if l1_vals else None
+    med_jac = _median(jac_vals) if jac_vals else None
+    a6_ok = None
+    if n_groups_ge3 and med_l1 is not None:
+        a6_ok = med_l1 <= 0.30
 
     return {
         "A1_precision_fabrication": {
@@ -527,21 +769,29 @@ def gates(q_metrics: list[dict], *,
         },
         "A2_calibration": {
             "ok": rel_ok,
-            "value": {"reliability": rel, "n_scored": rel_n},
-            "detail": "needs high/medium/low samples",
+            "value": {"reliability": rel, "n_scored": rel_n,
+                      "corroboration_rate": corr_rate,
+                      "corroborated_n": corr_n, "asserted_n": asserted_total},
+            "detail": "gates populated buckets: medium>=0.70 and medium>=low "
+                       "(when low sampled); corroboration rate >=0.05; high is "
+                       "reported only" + (high_note if high_n == 0 else ""),
         },
         "A3_honest_failure_U": {
-            "ok": (u_share is not None and u_share >= 0.60) if u else None,
-            "value": {"unsupported_share_U": u_share},
-            "detail": "needs U queries with claims",
+            "ok": a3_ok,
+            "value": {"honest_unresolved_U_subquestions": u_share,
+                      "n_subquestions_total": total_n,
+                      "n_subquestions_unresolved": unres_n,
+                      "unsupported_share_U_claim_level": cl_share},
+            "detail": "sub-question level: needs U sub-questions; "
+                       ">= 0.6 honestly unresolved",
         },
         "A4_crosscheck_benefit": {
             "ok": a4_ok,
-            "value": {"all_D_fired": d_fire, "n_D": len(d),
-                      "precision_with": prec, "precision_without": prec_nocc,
-                      "high_share_with": hs_with,
-                      "high_share_without": hs_nocc},
-            "detail": "needs the paired cross-check-off arm (q_metrics_nocc)",
+            "value": a4_value,
+            "detail": "needs the paired cross-check-off arm (q_metrics_nocc) "
+                       "with >=2 same-query pairs incl. a D query; fires on "
+                       ">=half the paired D queries, with-arm high_share > "
+                       "without, precision within 0.05 tolerance",
         },
         "A5_relevance": {
             "ok": a5_ok,
@@ -550,7 +800,12 @@ def gates(q_metrics: list[dict], *,
         },
         "A6_determinism": {
             "ok": a6_ok,
-            "value": {"flip_rate": flip},
-            "detail": "needs rerun ledger pair(s)",
+            "value": {"median_pairwise_l1": med_l1,
+                      "median_pairwise_subq_jaccard": med_jac,
+                      "flip_rate": flip,
+                      "n_rerun_groups_ge3": n_groups_ge3},
+            "detail": "needs >=3 reruns of a query (rerun_groups): "
+                       "distribution L1 <= 0.30 gates; sub-question Jaccard "
+                       ">= 0.40 reported; statement flip_rate informational",
         },
     }
