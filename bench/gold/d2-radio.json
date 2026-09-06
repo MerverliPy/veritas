@@ -11,16 +11,22 @@
       "note": "Patent fact, not priority verdict; independently documented in the 1943 Supreme Court opinion and the patent record."
     },
     {
-      "statement": "In Marconi Wireless Telegraph Co. of America v. United States (1943), the United States Supreme Court held that the principal tuning claims of Marconi's wireless patent (No. 763,772) were invalid because they were anticipated by an earlier patent of the American inventor John Stone Stone.",
+      "statement": "In Marconi Wireless Telegraph Co. of America v. United States (1943), the United States Supreme Court held that the principal tuning claims of Marconi's wireless patent number 763,772 were invalid because they were anticipated by an earlier patent of the American inventor John Stone Stone.",
       "gold_label": "correct",
       "confidence_class": "medium",
-      "note": "Factual about the ruling's holding: the Court invalidated the tuning claims (10 and 11) on Stone's prior patent and separately held claim 16 valid and infringed; its discussion of Tesla's 645,576 was descriptive (a four-circuit disclosure), not a holding that Tesla anticipated the patent wholesale. Wording is precise so the popular overclaim 'the Court declared Tesla the inventor of radio' cannot match this fact."
+      "note": "Factual about the ruling's holding: the Court invalidated the tuning claims (10 and 11) on Stone's prior patent and separately held claim 16 valid and infringed; its discussion of Tesla's 645,576 was descriptive (a four-circuit disclosure), not a holding that Tesla anticipated the patent wholesale. Written as 'patent number 763,772' (never the 'No.' abbreviation) so the lexical negation parser cannot misread it. Wording is precise so the popular overclaim 'the Court declared Tesla the inventor of radio' cannot match this fact."
     },
     {
       "statement": "Nikola Tesla invented the radio, not Guglielmo Marconi.",
       "gold_label": "contested",
       "confidence_class": "low",
-      "note": "Priority claim; genuinely disputed (Tesla-priority position) — never scored correct or incorrect."
+      "note": "Priority claim; genuinely disputed (Tesla-priority position) — never scored correct or incorrect. The 'not Marconi' contrast is present so polarity-aware lexical matching does not treat it as a different claim."
+    },
+    {
+      "statement": "Nikola Tesla invented the radio.",
+      "gold_label": "contested",
+      "confidence_class": "low",
+      "note": "Positively phrased Tesla-side priority claim so the ordinary formulation is classified contested in lexical scoring modes too (a negation-containing gold entry would reject it). Never scored correct or incorrect."
     },
     {
       "statement": "Guglielmo Marconi invented the radio.",

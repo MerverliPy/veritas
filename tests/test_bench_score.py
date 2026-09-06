@@ -1121,16 +1121,20 @@ def test_d2_radio_priority_claims_never_certified():
                         expected) == "contested"
     assert gold_verdict("Nikola Tesla invented the radio, not Marconi.",
                         expected) == "contested"
+    # positive phrasing (no negation) must classify as contested too (P2)
+    assert gold_verdict("Nikola Tesla invented the radio.",
+                        expected) == "contested"
     # the neutral patent anchor still matches when asserted verbatim-ish
     assert gold_verdict("In 1900 the United States Patent Office granted "
                         "Nikola Tesla patent number 645,576 for a wireless "
                         "transmission system, on an application filed on "
                         "2 September 1897.", expected) == "correct"
-    # the 320 U.S. 1 Stone-anticipation holding is the accurate reading
+    # the 320 U.S. 1 Stone-anticipation holding is the accurate reading;
+    # 'patent number 763,772' avoids the lexical negation parser (P2)
     assert gold_verdict("In Marconi Wireless Telegraph Co. of America v. "
                         "United States (1943), the United States Supreme "
                         "Court held that the principal tuning claims of "
-                        "Marconi's wireless patent (No. 763,772) were "
+                        "Marconi's wireless patent number 763,772 were "
                         "invalid because they were anticipated by an earlier "
                         "patent of the American inventor John Stone Stone.",
                         expected) == "correct"
