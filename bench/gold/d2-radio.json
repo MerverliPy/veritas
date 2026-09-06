@@ -43,6 +43,12 @@
       "note": "Concise alternate phrasing of the Nobel record so natural wording credits the same fact in lexical modes without inflating the recall denominator."
     },
     {
+      "statement": "Guglielmo Marconi received the 1909 Nobel Prize in Chemistry in recognition of his contributions to wireless telegraphy.",
+      "gold_label": "incorrect",
+      "confidence_class": "unsupported",
+      "note": "Wrong prize category: the 1909 award was the Nobel Prize in Physics (shared with Karl Ferdinand Braun), never Chemistry. Verbatim claims match this entry at higher similarity than the correct Physics variant, so the false category cannot ride the correct entry's tokens to credit."
+    },
+    {
       "statement": "Guglielmo Marconi received the 1909 Nobel Prize in Physics in recognition that he invented the radio.",
       "gold_label": "contested",
       "confidence_class": "low",
@@ -54,6 +60,12 @@
       "gold_label": "correct",
       "confidence_class": "medium",
       "note": "Numbered-claims alternate phrasing of the ruling fact so reports naming claims 10 and 11 credit the same fact in lexical modes without inflating the recall denominator."
+    },
+    {
+      "statement": "In Marconi Wireless Telegraph Co. of America v. United States (1943), the United States Supreme Court held that Marconi's tuning claims were invalid because they were anticipated by Nikola Tesla.",
+      "gold_label": "incorrect",
+      "confidence_class": "unsupported",
+      "note": "False attribution of the ruling's holding: the Court invalidated the tuning claims on John Stone Stone's prior patent; its discussion of Tesla was descriptive, not the anticipation holding. The popular 'Tesla anticipated Marconi' misreading must never receive credit. Verbatim claims match this entry at higher similarity than the Stone-based correct anchor, so the less-credit-worthy label wins."
     },
     {
       "statement": "Nikola Tesla invented the radio, not Guglielmo Marconi.",

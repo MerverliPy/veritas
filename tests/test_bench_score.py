@@ -1161,6 +1161,15 @@ def test_d2_radio_priority_claims_never_certified():
     assert gold_verdict("Guglielmo Marconi received the 1909 Nobel Prize in "
                         "Physics in recognition that he invented the radio.",
                         expected) == "contested"
+    # entity/category substitutions must never ride the correct anchors
+    assert gold_verdict("In Marconi Wireless Telegraph Co. of America v. "
+                        "United States (1943), the United States Supreme "
+                        "Court held that Marconi's tuning claims were "
+                        "invalid because they were anticipated by Nikola "
+                        "Tesla.", expected) == "incorrect"
+    assert gold_verdict("Guglielmo Marconi received the 1909 Nobel Prize "
+                        "in Chemistry in recognition of his contributions to "
+                        "wireless telegraphy.", expected) == "incorrect"
     # the 'Court declared Tesla the inventor' overclaim must never win credit
     assert gold_verdict("In 1943 the United States Supreme Court declared "
                         "Nikola Tesla the inventor of radio.",
