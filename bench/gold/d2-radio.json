@@ -11,6 +11,12 @@
       "note": "Patent fact, not priority verdict; independently documented in the 1943 Supreme Court opinion and the patent record."
     },
     {
+      "statement": "In 1900 the United States Patent Office granted Marconi patent number 645,576 for a wireless transmission system.",
+      "gold_label": "incorrect",
+      "confidence_class": "unsupported",
+      "note": "Patent 645,576 belonged to Nikola Tesla, not Marconi — a plausible conflation in a Marconi-versus-Tesla report. Verbatim claims match this entry at higher similarity than the correct Tesla anchor, so the mis-assignment cannot ride its tokens to credit."
+    },
+    {
       "statement": "Tesla's patent 645,576 for wireless transmission was filed in 1897 and granted in 1900.",
       "variant_of": "In 1900 the United States Patent Office granted Nikola Tesla patent number 645,576 for a wireless transmission system, on an application filed on 2 September 1897.",
       "gold_label": "correct",
@@ -34,6 +40,12 @@
       "gold_label": "correct",
       "confidence_class": "high",
       "note": "Marconi-side documented record (not a priority verdict), so accurate claims about Marconi's contribution have a correct target and D-class reliability is not one-sided. Independently verifiable (Nobel Foundation). Phrased without any 'invented the radio' wording so a flat one-sided credit claim cannot token-match it."
+    },
+    {
+      "statement": "Guglielmo Marconi shared the 1909 Nobel Prize in Physics with Nikola Tesla in recognition of their contributions to the development of wireless telegraphy.",
+      "gold_label": "incorrect",
+      "confidence_class": "unsupported",
+      "note": "The 1909 Physics prize was shared with Karl Ferdinand Braun, not Nikola Tesla — a plausible conflation in a Marconi-versus-Tesla report. Verbatim claims match this entry at higher similarity than the correct Braun anchor, so the wrong co-recipient cannot ride its tokens to credit."
     },
     {
       "statement": "Guglielmo Marconi received the 1909 Nobel Prize in Physics in recognition of his contributions to wireless telegraphy.",
@@ -60,6 +72,12 @@
       "gold_label": "correct",
       "confidence_class": "medium",
       "note": "Numbered-claims alternate phrasing of the ruling fact so reports naming claims 10 and 11 credit the same fact in lexical modes without inflating the recall denominator."
+    },
+    {
+      "statement": "In 1943 the United States Supreme Court held claims 10 and 11 of Marconi's patent number 763,772 valid despite John Stone Stone's earlier patent.",
+      "gold_label": "incorrect",
+      "confidence_class": "unsupported",
+      "note": "Reversed disposition: the Court held the claims invalid on Stone's prior patent, never valid despite it. 'Valid' vs 'invalid' is not a parsed-negation or quantity difference, so the false reversal needs its own entry; verbatim claims match it at higher similarity than the correct variant."
     },
     {
       "statement": "In Marconi Wireless Telegraph Co. of America v. United States (1943), the United States Supreme Court held that Marconi's tuning claims were invalid because they were anticipated by Nikola Tesla.",
