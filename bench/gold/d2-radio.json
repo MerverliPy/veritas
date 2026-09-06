@@ -55,6 +55,13 @@
       "note": "Concise co-recipient phrasing of the Nobel record so the natural 'X and Y shared the 1909 Nobel Prize in Physics' formulation credits the correct Braun pairing (and outranks the wrong-co-recipient Tesla guard) without inflating the recall denominator."
     },
     {
+      "statement": "Guglielmo Marconi won the 1909 Nobel Prize in Physics.",
+      "variant_of": "Guglielmo Marconi shared the 1909 Nobel Prize in Physics with Karl Ferdinand Braun in recognition of their contributions to the development of wireless telegraphy.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Concise Marconi-only phrasing of the Nobel record (no co-recipient or field detail), so a common accurate statement outranks the wrong-co-recipient Tesla guard instead of being captured by it."
+    },
+    {
       "statement": "Guglielmo Marconi shared the 1909 Nobel Prize in Physics with Nikola Tesla in recognition of their contributions to the development of wireless telegraphy.",
       "gold_label": "incorrect",
       "confidence_class": "unsupported",

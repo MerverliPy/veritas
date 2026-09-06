@@ -1211,6 +1211,13 @@ def test_d2_radio_priority_claims_never_certified():
                         "claims 10 and 11 of Marconi's patent number 763,772 "
                         "valid despite John Stone Stone's earlier patent.",
                         expected) == "incorrect"
+    # Marconi-only Nobel claims are correct; inflected 'invalidated' reversal
+    # of claim 16 never credits (round-11 P2s)
+    assert gold_verdict("Marconi won the 1909 Nobel Prize in Physics.",
+                        expected) == "correct"
+    assert gold_verdict("In 1943, the United States Supreme Court invalidated "
+                        "claim 16 of Marconi's patent 763,772.",
+                        expected) != "correct"
     # 'No.' patent abbreviation is not a negation (round-8 P2 matcher fix)
     assert gold_verdict("Tesla's patent No. 645,576 for wireless "
                         "transmission was filed in 1897 and granted in "
@@ -1424,6 +1431,8 @@ def test_status_antonym_and_synonym_matching():
                              "the patent was rejected in 1900")
     assert _antonym_conflict("claims 10 and 11 are invalid",
                              "claims 10 and 11 are valid")
+    assert _antonym_conflict("the Court invalidated claim 16",
+                             "claim 16 was valid and infringed")
     assert not _antonym_conflict("the patent was granted in 1900",
                                  "the patent was granted in 1901")
     gold = [{"statement": "Tesla's patent was granted in 1900.",
