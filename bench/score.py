@@ -112,7 +112,8 @@ _ANTONYM_PAIRS = (("granted", "rejected"), ("valid", "invalid"))
 # 'granted/issued/awarded' claim is never equidistant from a correct
 # 'granted' entry and its mirror 'rejected' guard (which would tie-break
 # toward the incorrect label).
-_STATUS_SYNONYMS = {"issued": "granted", "awarded": "granted"}
+_STATUS_SYNONYMS = {"issued": "granted", "awarded": "granted",
+                     "allowed": "granted"}
 
 
 def _negation_count(text: str) -> int:

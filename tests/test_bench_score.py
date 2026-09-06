@@ -1197,6 +1197,12 @@ def test_d2_radio_priority_claims_never_certified():
     assert gold_verdict("Tesla's patent 645,576 for wireless transmission "
                         "was filed in 1897 and awarded in 1900.",
                         expected) == "correct"
+    assert gold_verdict("Tesla's patent 645,576 for wireless transmission "
+                        "was filed in 1897 and allowed in 1900.",
+                        expected) == "correct"
+    # the claim-16 holding (valid and infringed) is a scored anchor too
+    assert gold_verdict("The Supreme Court held claim 16 of Marconi patent "
+                        "763,772 valid and infringed.", expected) == "correct"
     # concise invalid-holding phrasing credits; 'valid despite' never does
     assert gold_verdict("In 1943 the Supreme Court held Marconi's claims 10 "
                         "and 11 invalid due to Stone's earlier patent.",
@@ -1427,6 +1433,8 @@ def test_status_antonym_and_synonym_matching():
     assert gold_verdict("Tesla's patent was issued in 1900.",
                         gold) == "correct"
     assert gold_verdict("Tesla's patent was awarded in 1900.",
+                        gold) == "correct"
+    assert gold_verdict("Tesla's patent was allowed in 1900.",
                         gold) == "correct"
     assert gold_verdict("Tesla's patent was rejected in 1900.",
                         gold) == "incorrect"

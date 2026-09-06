@@ -100,6 +100,12 @@
       "note": "Concise numbered-claims phrasing of the ruling fact (names the claims and the invalid disposition without the case caption), so ordinary paraphrase credits the same fact in lexical modes without inflating the recall denominator."
     },
     {
+      "statement": "In Marconi Wireless Telegraph Co. of America v. United States (1943), the United States Supreme Court held claim 16 of Marconi's patent number 763,772 valid and infringed.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Second holding of 320 U.S. 1, alongside the Stone-based invalidation of claims 10 and 11: unlike the tuning claims, claim 16 was held valid and infringed. Part of the accurate reading the sheet's own note relies on, so reports that state this nuance can earn reliability credit instead of falling unmatched."
+    },
+    {
       "statement": "In 1943 the United States Supreme Court held claims 10 and 11 of Marconi's patent number 763,772 valid despite John Stone Stone's earlier patent.",
       "gold_label": "incorrect",
       "confidence_class": "unsupported",
