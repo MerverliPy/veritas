@@ -695,14 +695,29 @@ def test_rescore_provenance_records_crosscheck_and_revisions(tmp_path):
     assert prov["gold_rev"] == rb.gold_revision(gold_dir, ["f1"])
 
 
+def _rerun_dir(tmp_path, name, *query_ids, crosscheck="on", ok_ids=None):
+    """Build a realistic determinism run dir: scorecard.json (provenance
+    crosscheck + per-query ok status) plus empty per-query subdirs, matching
+    the layout run_benchmark.py produces. Query ids default to all ok."""
+    d = tmp_path / name
+    for qid in query_ids:
+        (d / qid).mkdir(parents=True, exist_ok=True)
+    ok_ids = query_ids if ok_ids is None else ok_ids
+    (d / "scorecard.json").write_text(json.dumps({
+        "provenance": {"crosscheck": crosscheck},
+        "queries": [{"id": qid, "ok": qid in ok_ids,
+                      "metrics": {}} for qid in query_ids]}))
+    return d
+
+
 def test_collect_rerun_groups_requires_three_same_query_ledgers(tmp_path):
     """A6 determinism helper groups ledgers per query id; a query needs >=3
-    rerun dirs to form a group; corrupt reruns are skipped, not fatal."""
+    rerun dirs to form a group; corrupt reruns are skipped, not fatal; a
+    ledger whose scorecard entry is not ok is excluded (Codex)."""
     from bench.run_benchmark import collect_rerun_groups
     dirs = []
     for name in ("det-1", "det-2", "det-3"):
-        d = tmp_path / name
-        (d / "f1").mkdir(parents=True)
+        d = _rerun_dir(tmp_path, name, "f1", "u1")
         dirs.append(d)
     # f1 present in all three; u1 only in two
     for i, d in enumerate(dirs):
@@ -712,7 +727,6 @@ def test_collect_rerun_groups_requires_three_same_query_ledgers(tmp_path):
              "query": "q f1",
              "confidence_counts": {"medium": 1}}))
         if i < 2:
-            (d / "u1").mkdir()
             (d / "u1" / "ledger.json").write_text(json.dumps(
                 {"query": "q u1", "claims": [], "confidence_counts": {}}))
     queries = [{"id": "f1", "query": "q f1"},
@@ -723,6 +737,12 @@ def test_collect_rerun_groups_requires_three_same_query_ledgers(tmp_path):
     (dirs[1] / "f1" / "ledger.json").write_text("not json{{")
     groups2 = collect_rerun_groups(dirs, queries)
     assert len(groups2) == 0                            # <3 usable reruns
+    # a stale ledger whose scorecard marks the query ok:false is excluded
+    stale = _rerun_dir(tmp_path, "det-4", "f1", ok_ids=())
+    (stale / "f1" / "ledger.json").write_text(json.dumps(
+        {"query": "q f1", "claims": [], "confidence_counts": {"high": 1}}))
+    groups3 = collect_rerun_groups([dirs[0], dirs[1], stale], queries)
+    assert len(groups3) == 0                            # stale never counts
 
 
 def test_collect_rerun_groups_skips_mismatched_query_ledgers(tmp_path):
@@ -731,8 +751,7 @@ def test_collect_rerun_groups_skips_mismatched_query_ledgers(tmp_path):
     from bench.run_benchmark import collect_rerun_groups
     dirs = []
     for name in ("det-1", "det-2", "det-3", "det-4"):
-        d = tmp_path / name
-        (d / "f1").mkdir(parents=True)
+        d = _rerun_dir(tmp_path, name, "f1")
         dirs.append(d)
     for i, d in enumerate(dirs):
         text = "q f1" if i < 3 else "a DIFFERENT question"
@@ -748,24 +767,23 @@ def test_rerun_dirs_deduplicated_before_three_required(tmp_path):
     >=3-distinct-runs requirement (three identical pairwise distances are all
     zero and would fabricate a determinism pass from one actual run)."""
     import bench.run_benchmark as rb
-    d = tmp_path / "det-1"
-    (d / "f1").mkdir(parents=True)
+    d = _rerun_dir(tmp_path, "det-1", "f1")
     (d / "f1" / "ledger.json").write_text(json.dumps(
         {"query": "q f1", "claims": [], "confidence_counts": {"high": 1}}))
     from bench.run_benchmark import _load_optional_reruns
     with pytest.raises(SystemExit):
         _load_optional_reruns(f"{d},{d},{d}", parser=__import__(
             "argparse").ArgumentParser(), queries=[{"id": "f1",
-                                                     "query": "q f1"}])
+                                                     "query": "q f1"}],
+            require_crosscheck="on")
     # three genuinely distinct dirs pass the dedupe gate
     for name in ("det-2", "det-3"):
-        d_other = tmp_path / name
-        (d_other / "f1").mkdir(parents=True)
+        d_other = _rerun_dir(tmp_path, name, "f1")
         (d_other / "f1" / "ledger.json").write_text(json.dumps(
             {"query": "q f1", "claims": [], "confidence_counts": {"high": 1}}))
     groups = _load_optional_reruns(
         f"{d},{tmp_path / 'det-2'},{tmp_path / 'det-3'}",
-        queries=[{"id": "f1", "query": "q f1"}])
+        queries=[{"id": "f1", "query": "q f1"}], require_crosscheck="on")
     assert groups and len(groups[0]) == 3
 
 
@@ -807,6 +825,27 @@ def test_a4_off_arm_main_run_is_rejected(tmp_path):
                             require_gold_judge_on=True, expected=expected)
 
 
+def test_rescore_rejects_missing_crosscheck_provenance(tmp_path, monkeypatch):
+    """Codex P1: rescoring a source scorecard without provenance.crosscheck
+    must abort — defaulting a missing arm to 'on' could rescore an off-arm
+    run as if it were the main arm and fabricate an arm identity in the
+    rescore artifact."""
+    import sys
+    from bench.run_benchmark import main as _main
+    run_dir = tmp_path / "legacy"
+    run_dir.mkdir()
+    # legacy/malformed scorecard: queries scored but no crosscheck provenance
+    (run_dir / "scorecard.json").write_text(json.dumps({
+        "provenance": {"gold_judge": "on"},
+        "queries": [{"id": "f1", "ok": True, "query": "q f1",
+                      "class": "F", "metrics": {"class": "F"}}]}))
+    monkeypatch.setattr(sys, "argv", ["run_benchmark.py",
+                                      "--rescore", str(run_dir),
+                                      "--no-judge"])
+    with pytest.raises(SystemExit):
+        _main()
+
+
 def test_rerun_dirs_without_usable_groups_fail_preflight(tmp_path):
     """Codex: three distinct but unusable rerun dirs (missing ledgers) must be
     rejected up front, not silently produce an empty A6 after missions ran."""
@@ -831,24 +870,21 @@ def test_rerun_dirs_require_crosscheck_arm_provenance(tmp_path):
     from bench.run_benchmark import _load_optional_reruns
     import bench.run_benchmark as rb
 
-    def _make(name, crosscheck):
-        d = tmp_path / name
-        (d / "f1").mkdir(parents=True)
+    d1, d2, d3 = (_rerun_dir(tmp_path, n, "f1", crosscheck="on")
+                  for n in ("det-1", "det-2", "det-3"))
+    for d in (d1, d2, d3):
         (d / "f1" / "ledger.json").write_text(json.dumps(
             {"query": "q f1", "claims": [],
              "confidence_counts": {"high": 1}}))
-        (d / "scorecard.json").write_text(json.dumps(
-            {"provenance": {"crosscheck": crosscheck}, "queries": []}))
-        return d
-
-    d1, d2, d3 = _make("det-1", "on"), _make("det-2", "on"), _make("det-3", "on")
     qs = [{"id": "f1", "query": "q f1"}]
     # all on-arm dirs match an on-arm evaluation
     groups = _load_optional_reruns(f"{d1},{d2},{d3}", queries=qs,
                                    require_crosscheck="on")
     assert groups and len(groups[0]) == 3
     # a single off-arm dir mixed in aborts loudly (not silently skipped)
-    d4 = _make("det-4", "off")
+    d4 = _rerun_dir(tmp_path, "det-4", "f1", crosscheck="off")
+    (d4 / "f1" / "ledger.json").write_text(json.dumps(
+        {"query": "q f1", "claims": [], "confidence_counts": {"high": 1}}))
     parser = __import__("argparse").ArgumentParser()
     with pytest.raises(SystemExit):
         _load_optional_reruns(f"{d1},{d2},{d4}", parser=parser, queries=qs,
@@ -872,8 +908,7 @@ def test_rerun_groups_reject_distribution_less_ledgers(tmp_path):
     from bench.run_benchmark import collect_rerun_groups
     dirs = []
     for name in ("det-1", "det-2", "det-3"):
-        d = tmp_path / name
-        (d / "f1").mkdir(parents=True)
+        d = _rerun_dir(tmp_path, name, "f1")
         dirs.append(d)
     # three distribution-less, plan-less ledgers -> no group
     for d in dirs:

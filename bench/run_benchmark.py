@@ -269,16 +269,17 @@ def collect_rerun_groups(run_dirs: list[Path],
     the expected query is NOT a rerun of that question — it is skipped like
     a corrupt ledger, so A6 can never pass on mismatched missions."""
     if require_crosscheck is not None:
-        verified = []
+        verified: list[tuple[Path, dict[str, bool]]] = []
         for d in run_dirs:
             sc = Path(d) / "scorecard.json"
             if not sc.exists():
                 raise ValueError(f"rerun dir has no scorecard.json: {d} — "
                                  f"cannot verify its crosscheck arm")
             try:
-                prov = load_json(sc).get("provenance", {})
+                data = load_json(sc)
             except Exception:  # noqa: BLE001
                 raise ValueError(f"rerun dir scorecard unreadable: {d}") from None
+            prov = data.get("provenance", {})
             cc = prov.get("crosscheck")
             if cc != require_crosscheck:
                 raise ValueError(
@@ -286,8 +287,34 @@ def collect_rerun_groups(run_dirs: list[Path],
                     f"evaluated run is crosscheck-{require_crosscheck!r}; "
                     f"mixing arms measures configuration drift, not "
                     f"determinism (cross-check promotes medium->high)")
-            verified.append(d)
-        run_dirs = verified
+            # Per-query status (Codex): a ledger is a valid rerun ONLY when
+            # its own run's scorecard marks that query ok — a re-run that
+            # failed leaves the previous ledger.json in place while the new
+            # scorecard records ok:false; accepting the stale file by path
+            # would fabricate a third rerun from a failed mission.
+            ok_by_id: dict[str, bool] = {}
+            for e in data.get("queries", []):
+                if isinstance(e, dict) and e.get("id"):
+                    ok_by_id[e["id"]] = bool(e.get("ok"))
+            verified.append((d, ok_by_id))
+        dir_ok = verified
+    else:
+        # No arm requirement: still require a scorecard per dir and honor its
+        # per-query ok status (a dir without a scorecard is not a real run).
+        dir_ok = []
+        for d in run_dirs:
+            sc = Path(d) / "scorecard.json"
+            if not sc.exists():
+                continue
+            try:
+                data = load_json(sc)
+            except Exception:  # noqa: BLE001
+                continue
+            ok_by_id: dict[str, bool] = {}
+            for e in data.get("queries", []):
+                if isinstance(e, dict) and e.get("id"):
+                    ok_by_id[e["id"]] = bool(e.get("ok"))
+            dir_ok.append((d, ok_by_id))
     groups: list[list[dict]] = []
     for q in queries:
         qid = q.get("id")
@@ -295,7 +322,9 @@ def collect_rerun_groups(run_dirs: list[Path],
         if not qid:
             continue
         ledgers = []
-        for d in run_dirs:
+        for d, ok_by_id in dir_ok:
+            if ok_by_id.get(qid) is not True:
+                continue   # not a successful rerun of this query (Codex)
             lp = Path(d) / qid / "ledger.json"
             if not lp.exists():
                 continue
@@ -648,6 +677,14 @@ def main() -> int:
                     f"(not found in {run_dir})")
         orig = load_json(orig_scorecard)
         prov = orig.get("provenance", {})
+        # Arm identity must be explicit (Codex): a source scorecard without
+        # provenance.crosscheck cannot be trusted as an on-arm run — defaulting
+        # it to "on" could rescore an off-arm run as if it were the main arm
+        # and fabricate an arm identity in the rescore artifact.
+        if prov.get("crosscheck") not in ("on", "off"):
+            p.error(f"rescore requires the source run's provenance.crosscheck "
+                    f"(missing or invalid in {orig_scorecard}); cannot verify "
+                    f"whether this is the cross-check-on arm")
         nocc_orig = prov.get("crosscheck") == "off"
         recorded = {e["id"]: e for e in orig.get("queries", [])
                     if isinstance(e, dict)}

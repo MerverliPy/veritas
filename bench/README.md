@@ -102,7 +102,14 @@ python3 bench/run_benchmark.py --rescore out/bench/full-1 \
 ```
 
 `load_paired_metrics` prefers `scorecard-rescore.json` when present, so the
-refreshed arm is picked up automatically.
+refreshed arm is picked up automatically. Rescoring also requires the
+source run's provenance to record its crosscheck arm explicitly (a legacy
+scorecard without it is rejected, never defaulted to "on" — an off-arm run
+must not be able to acquire a fabricated main-arm identity). Rerun ledgers
+are only accepted when their own run's scorecard marks that query
+successful: a re-run that failed leaves the previous `ledger.json` in
+place while the new scorecard records `ok: false`, and that stale file
+must never count as a determinism rerun.
 
 ## Boundaries
 
