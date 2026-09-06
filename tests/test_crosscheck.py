@@ -139,6 +139,20 @@ def test_corroborate_from_semantic_promotes_only_on_different_sources():
     assert (flags2, promos2) == (1, 0)
     assert pc2.crosschecked is True
     assert pc2.confidence == "medium"
+    # cross citing only a SUBSET of the primary's sources (primary {A,B},
+    # cross {A}) adds no new locator — set inequality alone must not promote
+    pc3 = Claim(
+        id="c1", statement="The USSR orbited Sputnik in October 1957",
+        evidence=[ev("https://wiki.example/s"), ev("https://nasa.example/x")],
+        verdict=Verdict.SUPPORTED, confidence="medium")
+    xc3 = Claim(
+        id="x1", statement="The USSR orbited Sputnik in October 1957",
+        evidence=[ev("https://wiki.example/s")],
+        verdict=Verdict.SUPPORTED, confidence="medium")
+    flags3, promos3, _ = corroborate_from_semantic(llm, [pc3], [xc3])
+    assert (flags3, promos3) == (1, 0)
+    assert pc3.crosschecked is True
+    assert pc3.confidence == "medium"
 
 
 # -------------------------------------------------------- detect_contradictions

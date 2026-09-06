@@ -249,7 +249,7 @@ def corroborate_from_semantic(
         xc_locs = {e.source.locator() for e in xc.evidence}
         if (pc.verdict is Verdict.SUPPORTED
                 and pc.confidence == "medium"
-                and pc_locs and pc_locs != xc_locs):
+                and pc_locs and (xc_locs - pc_locs)):
             pc.confidence = "high"
             promotions += 1
     return flags, promotions, pairs
