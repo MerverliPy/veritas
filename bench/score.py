@@ -120,7 +120,7 @@ _STATUS_SYNONYMS = {"issued": "granted", "awarded": "granted",
 # other. They fold onto a separate 'void' marker that conflicts with
 # 'valid', 'invalid', and 'granted' alike.
 _VOID_STATUSES = ("unenforceable", "voided", "vacated", "revoked",
-                   "overturned", "cancelled")
+                   "overturned", "cancelled", "canceled")
 
 _STATUS_TERMS = {"granted": "granted", "rejected": "rejected",
                  "valid": "valid", "invalid": "invalid"}

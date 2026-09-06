@@ -1243,6 +1243,13 @@ def test_d2_radio_priority_claims_never_certified():
                         expected) != "correct"
     assert gold_verdict("Guglielmo Marconi and Nikola Tesla won the 1909 "
                         "Nobel Prize in Physics.", expected) == "incorrect"
+    # 'won ... for inventing radio' fusion resolves contested (round 16)
+    assert gold_verdict("Guglielmo Marconi won the Nobel Prize in Physics "
+                        "in 1909 for inventing radio.",
+                        expected) == "contested"
+    assert gold_verdict("In 1943, the United States Supreme Court canceled "
+                        "claim 16 of Marconi's patent 763,772.",
+                        expected) != "correct"
     # 'No.' patent abbreviation is not a negation (round-8 P2 matcher fix)
     assert gold_verdict("Tesla's patent No. 645,576 for wireless "
                         "transmission was filed in 1897 and granted in "

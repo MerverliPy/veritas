@@ -131,6 +131,12 @@
       "note": "False attribution of the ruling's holding: the Court invalidated the tuning claims on John Stone Stone's prior patent; its discussion of Tesla was descriptive, not the anticipation holding. The popular 'Tesla anticipated Marconi' misreading must never receive credit. Verbatim claims match this entry at higher similarity than the Stone-based correct anchor, so the less-credit-worthy label wins."
     },
     {
+      "statement": "Guglielmo Marconi won the Nobel Prize in Physics in 1909 for inventing radio.",
+      "gold_label": "contested",
+      "confidence_class": "low",
+      "note": "Fused claim turning the Nobel record into a one-sided invention verdict (the award recognized contributions to wireless telegraphy, not 'for inventing radio'). Disputed; never scored correct or incorrect. Competing contested formulation so lexical modes downgrade the 'won ... for inventing radio' fusion away from the correct Marconi-only 'won' variant."
+    },
+    {
       "statement": "Nikola Tesla invented the radio, not Guglielmo Marconi.",
       "gold_label": "contested",
       "confidence_class": "low",
