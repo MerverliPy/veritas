@@ -57,17 +57,18 @@ def test_supporting_sources_annotate_evidence(tmp_path: Path):
     assert c.evidence[1].supports is True
 
 
-def test_supporting_sources_absent_keeps_all_supporting(tmp_path: Path):
-    """Hermetic scripts / older prompts omit the field: claim-level semantics
-    unchanged (every cited source treated as supporting)."""
+def test_supporting_sources_absent_fails_closed(tmp_path: Path):
+    """A supported verdict with the field absent/malformed confers NO
+    per-locator support (the response schema is not enforced on the model, so
+    a missing field must not enable promotion via a bundled locator)."""
     llm = FakeLLM({VERIFY_SYSTEM: json.dumps({
         "verdict": "supported", "reason": "text agrees",
         "better_statement": ""})})
     provs = build_providers([Surface.LOCAL], local_root=tmp_path)
     c = _two_file_claim(tmp_path)
     verify_claim(llm, c, {Surface.LOCAL: provs[0]})
-    assert c.evidence[0].supports is True
-    assert c.evidence[1].supports is True
+    assert c.evidence[0].supports is False
+    assert c.evidence[1].supports is False
 
 
 def test_supporting_sources_empty_marks_none_supporting(tmp_path: Path):

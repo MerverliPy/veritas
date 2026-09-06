@@ -94,15 +94,13 @@ def _apply_support_flags(claim: Claim, data: dict, verdict: Verdict) -> None:
 
     The verifier names ``supporting_sources`` (1-based indices into the cited
     sources); every other entry is marked non-supporting so a bundled but
-    irrelevant locator can never be used as independent corroboration. When
-    the model omits the field (hermetic scripts, older prompts) all entries
-    stay defaulted to supporting — claim-level semantics unchanged."""
+    irrelevant locator can never be used as independent corroboration.
+    FAIL-CLOSED: when the field is absent, empty or malformed, NO entry is
+    treated as supporting — the response schema is not enforced on the model,
+    so a missing field must never confer verified per-locator support
+    (Codex round-8 P1)."""
     raw = data.get("supporting_sources")
-    if not isinstance(raw, list):
-        return
-    if not raw:
-        # supported verdict naming NO supporting source: nothing verified as
-        # backing, so no locator may drive a promotion
+    if not isinstance(raw, list) or not raw:
         if verdict is Verdict.SUPPORTED and claim.evidence:
             for ev in claim.evidence:
                 ev.supports = False

@@ -148,19 +148,39 @@ def test_reconcile_unsupported_lexical_echo_never_corroborates():
     assert xc not in result["candidates"]  # consumed, no corroboration
 
 
-def test_reconcile_opposite_polarity_never_corroborates():
-    """'released in March' vs 'NOT released in March' share every significant
-    token ('not' is a stopword), so a verified negation must be surfaced as a
-    candidate for the conflict detector — never consumed as agreement or
-    promoted (Codex round-6 P1)."""
-    pc = claim("Version 2.0 was released in March 2025", "https://a.example/x")
-    xc = claim("Version 2.0 was not released in March 2025",
+def test_reconcile_negated_echo_defers_to_conflict_detector():
+    """Any negation — 'not', bare 'no', 'can't' — makes the statement differ
+    as a string, so a verified negated echo is deferred to the conflict
+    detector, never consumed as agreement or promoted (Codex round-6/8)."""
+    for negated in ("Version 2.0 was not released in March 2025",
+                    "The drug has no effect",
+                    "The drug can't cure the disease"):
+        pc_stmt = {"Version 2.0 was not released in March 2025":
+                   "Version 2.0 was released in March 2025",
+                   "The drug has no effect": "The drug has an effect",
+                   "The drug can't cure the disease":
+                   "The drug cures the disease"}[negated]
+        pc = claim(pc_stmt, "https://a.example/x")
+        xc = claim(negated, "https://b.example/y", cid="x1")
+        result = reconcile([pc], [xc])
+        assert result["corroborated"] == 0
+        assert pc.crosschecked is False
+        assert pc.confidence == "medium"
+        assert xc in result["candidates"]  # reaches detect_contradictions
+
+
+def test_reconcile_role_reversal_defers():
+    """Token-identical role reversals ('A beats B' vs 'B beats A') differ as
+    strings: they must reach the conflict detector, never corroborate
+    (Codex round-8 P1)."""
+    pc = claim("Drug Alpha is more effective than Drug Beta", "https://a.example/x")
+    xc = claim("Drug Beta is more effective than Drug Alpha",
                "https://b.example/y", cid="x1")
     result = reconcile([pc], [xc])
     assert result["corroborated"] == 0
     assert pc.crosschecked is False
     assert pc.confidence == "medium"
-    assert xc in result["candidates"]  # reaches detect_contradictions later
+    assert xc in result["candidates"]
 
 
 def test_reconcile_no_promotion_on_bundled_unsupporting_locator():
