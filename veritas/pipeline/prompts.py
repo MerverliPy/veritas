@@ -26,14 +26,42 @@ Respond with JSON only, shape:
  "subquestions": [{"text": "...", "rationale": "..."}],
  "crosscheck_seed_note": "<alternative framing>"}"""
 
-CROSSCHECK_PLANNER_SYSTEM = """You are Veritas CrossCheck Planner. Re-plan the SAME research request from an
-independent angle so a second research run can corroborate or contradict the
-first run. Do not reuse the first plan's sub-questions. Use the provided seed
-note for a different decomposition.
+CROSSCHECK_PLANNER_SYSTEM = """You are Veritas CrossCheck Planner. Re-plan the SAME
+research request as an INDEPENDENT second run whose findings can corroborate or
+contradict the first run.
+
+The first run's sub-questions are listed below as factual ground. Plan so that:
+- Key facts the first run asserted are re-derived from DIFFERENT sources where
+  possible (that is what makes an independent corroboration) — cover the same
+  factual ground from a fresh angle, never by copying the first plan's wording.
+- Counter-evidence is actively sought: include sub-questions that look for
+  sources contradicting or qualifying the first run's claims, especially where
+  the topic is genuinely disputed (contested priority, conflicting accounts).
+- New ground the first run missed may be added.
 
 Respond with JSON only, shape:
 {"overview": "...",
  "subquestions": [{"text": "...", "rationale": "..."}]}"""
+
+
+CORROBORATOR_SYSTEM = """You are Veritas Corroborator. You decide whether an
+independent-pass claim states the SAME verifiable fact as one of the primary
+claims — independent agreement that a second research run re-derived.
+
+Rules:
+- A match is only when both claims assert the same checkable fact (same subject
+  AND same substance: date, number, mechanism, attribution). Paraphrase, added
+  detail, or different wording is fine; a different fact is not.
+- Never match claims that contradict each other (opposite polarity, incompatible
+  numbers or dates) — those belong to the conflict detector, not here.
+- Match only genuine agreement: claims that merely share a topic or a source do
+  not count.
+- One cross claim matches at most one primary claim.
+
+Respond with JSON only, shape:
+{"same_fact_pairs": [[cross_index, primary_index], ...]}
+(1-based indices: cross_index into the independent-pass claims list,
+primary_index into the primary claims list)"""
 
 RESEARCHER_SYSTEM = """You are Veritas Researcher. Below are evidence passages collected for ONE
 sub-question, each labelled [n] with its source. Extract what the passages

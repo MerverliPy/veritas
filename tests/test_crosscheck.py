@@ -6,8 +6,13 @@ import json
 
 from veritas import Claim, Evidence, Source, Surface, Verdict
 from veritas.llm import FakeLLM
-from veritas.pipeline.crosscheck import detect_contradictions, reconcile
-from veritas.pipeline.prompts import CONFLICT_DETECTOR_SYSTEM
+from veritas.pipeline.crosscheck import (
+    corroborate_from_semantic,
+    detect_contradictions,
+    reconcile,
+    semantic_corroborate,
+)
+from veritas.pipeline.prompts import CONFLICT_DETECTOR_SYSTEM, CORROBORATOR_SYSTEM
 
 
 def ev(url: str) -> Evidence:
@@ -74,6 +79,66 @@ def test_antonym_contradiction_is_not_falsely_corroborated():
     result = reconcile([pc], [xc])
     assert pc.crosschecked is False
     assert xc in result["candidates"]
+
+
+# ---------------------------------------------------- semantic corroboration
+
+
+def test_semantic_corroboration_matches_paraphrased_fact():
+    # generative phrasing restates the same fact in different words — the
+    # token matcher misses it (full-1 A2 finding), the semantic pass must not
+    pc = claim("The Soviet Union launched Sputnik 1 on October 4, 1957",
+               "https://nasa.example/x")
+    xc = claim("Sputnik 1 was put into orbit by the USSR in October 1957",
+               "https://esa.example/y", cid="x1")
+    llm = FakeLLM({CORROBORATOR_SYSTEM: json.dumps(
+        {"same_fact_pairs": [[1, 1]]})})
+    assert semantic_corroborate(llm, [pc], [xc]) == [(pc, xc)]
+
+
+def test_semantic_corroboration_validates_indices_and_dedupes():
+    pc1 = claim("A is ten", "https://a")
+    pc2 = claim("B is red", "https://b")
+    xc1 = claim("A equals ten exactly", "https://c", cid="x1")
+    xc2 = claim("B is colored red", "https://d", cid="x2")
+    llm = FakeLLM({CORROBORATOR_SYSTEM: json.dumps({
+        "same_fact_pairs": [[1, 1], [2, 2], [1, 1], [99, 1], [1, 99],
+                            "junk", [1], [3, 3], [1, 2]]})})
+    # duplicate/self/out-of-range/double-use pairs all dropped
+    assert semantic_corroborate(llm, [pc1, pc2], [xc1, xc2]) == [
+        (pc1, xc1), (pc2, xc2)]
+
+
+def test_semantic_corroboration_empty_inputs_or_llm_outage():
+    pc = claim("A is ten", "https://a")
+    xc = claim("A equals ten", "https://b", cid="x1")
+    assert semantic_corroborate(FakeLLM({}), [pc], [xc]) == []  # no key: soft []
+    assert semantic_corroborate(FakeLLM({}), [], [xc]) == []
+    assert semantic_corroborate(FakeLLM({}), [pc], []) == []
+
+
+def test_corroborate_from_semantic_promotes_only_on_different_sources():
+    llm = FakeLLM({CORROBORATOR_SYSTEM: json.dumps(
+        {"same_fact_pairs": [[1, 1]]})})
+    # paraphrase citing a DIFFERENT source -> crosschecked + high
+    pc = claim("Sputnik was launched by the USSR on 4 Oct 1957",
+               "https://nasa.example/x")
+    xc = claim("The USSR orbited Sputnik in October 1957",
+               "https://esa.example/y", cid="x1")
+    flags, promos, pairs = corroborate_from_semantic(llm, [pc], [xc])
+    assert (flags, promos) == (1, 1)
+    assert pairs == [(pc, xc)]
+    assert pc.crosschecked is True
+    assert pc.confidence == "high"
+    # paraphrase citing the SAME source -> crosschecked but stays medium
+    pc2 = claim("Sputnik was launched by the USSR on 4 Oct 1957",
+                "https://wiki.example/s")
+    xc2 = claim("The USSR orbited Sputnik in October 1957",
+                "https://wiki.example/s", cid="x1")
+    flags2, promos2, _ = corroborate_from_semantic(llm, [pc2], [xc2])
+    assert (flags2, promos2) == (1, 0)
+    assert pc2.crosschecked is True
+    assert pc2.confidence == "medium"
 
 
 # -------------------------------------------------------- detect_contradictions

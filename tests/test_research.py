@@ -6,7 +6,9 @@ boilerplate, so claim extraction saw titles and menus instead of content.
 
 from __future__ import annotations
 
-from veritas import Evidence, FakeLLM, Source, Surface
+import json
+
+from veritas import Evidence, FakeLLM, Query, Source, Surface
 from veritas.connectors.base import Provider
 from veritas.pipeline.prompts import RESEARCHER_SYSTEM
 from veritas.pipeline.research import research_subquestion, _fetched_passage
@@ -53,6 +55,42 @@ def test_near_empty_page_is_skipped_with_warning():
     assert len(evidence) == 1
     assert evidence[0].kind == "search"
     assert any("near-empty page skipped" in w for w in warnings)
+
+
+def test_crosscheck_plan_sees_primary_subquestions():
+    """The independent pass is planned over the first pass's factual ground
+    (its sub-questions) so it can re-derive the same key facts from different
+    sources and probe them for counter-evidence — instead of drifting onto a
+    disjoint/counterfactual angle nothing can corroborate (full-1 A2/A4)."""
+    from veritas.pipeline.prompts import CROSSCHECK_PLANNER_SYSTEM
+    from veritas.pipeline.research import make_crosscheck_plan
+
+    seen: dict[str, str] = {}
+
+    def plan(user: str) -> str:
+        seen["user"] = user
+        return json.dumps({"overview": "ind",
+                           "subquestions": [{"text": "cross q", "rationale": "r"}]})
+
+    llm = FakeLLM({CROSSCHECK_PLANNER_SYSTEM: plan})
+    out = make_crosscheck_plan(llm, Query("compare tools"), "other angle",
+                               primary_subquestions=["What is A?",
+                                                     "Is B maintained?"])
+    assert out.subquestions[0].text == "cross q"
+    u = seen["user"]
+    assert "What is A?" in u and "Is B maintained?" in u
+    assert "other angle" in u
+    assert "compare tools" in u
+
+
+def test_crosscheck_plan_without_primary_ground_still_works():
+    from veritas.pipeline.prompts import CROSSCHECK_PLANNER_SYSTEM
+    from veritas.pipeline.research import make_crosscheck_plan
+
+    llm = FakeLLM({CROSSCHECK_PLANNER_SYSTEM: json.dumps({
+        "overview": "ind", "subquestions": []})})
+    out = make_crosscheck_plan(llm, Query("t"), "seed")
+    assert out.subquestions[0].text == "t"  # fallback single question
 
 
 def test_fetched_passage_returns_head_when_no_terms_match():
