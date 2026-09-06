@@ -91,6 +91,33 @@ def test_mission_with_no_evidence_reports_gaps(tmp_path: Path):
     assert (tmp_path / "o" / "report.md").exists()
 
 
+def test_evidence_with_empty_extraction_records_named_gap(tmp_path, monkeypatch):
+    """A planned sub-question that fetched evidence but extracted nothing
+    assertable must stay observable as a named gap — otherwise it vanishes
+    from the ledger (no claim, no gap) and biases the A3 honest-failure
+    denominator (Codex P2)."""
+    import veritas.pipeline.runner as runner_mod
+    notes = make_notes(tmp_path)
+    plan = json.dumps({"overview": "x", "subquestions": [
+        {"text": "What is AlphaNote's version?", "rationale": "r"}],
+        "crosscheck_seed_note": "n/a"})
+    llm = scripted_llm(plan=plan)
+    monkeypatch.setattr(runner_mod, "extract_claims",
+                        lambda llm_, sub, evidence, researcher=None:
+                        ([], []))  # evidence found, nothing assertable
+    runner = Runner(llm=llm,
+                    providers=build_providers([Surface.LOCAL],
+                                              local_root=notes),
+                    outdir=tmp_path / "o-gap")
+    report = runner.run(Query("AlphaNote version", surfaces=[Surface.LOCAL]))
+    assert report.claims == []
+    assert "no evidence found for: What is AlphaNote's version?" in report.gaps
+    ledger = json.loads(
+        (tmp_path / "o-gap" / "ledger.json").read_text())
+    assert any("no evidence found for: What is AlphaNote's version?" in g
+               for g in ledger["gaps"])
+
+
 def test_crosscheck_can_be_disabled(tmp_path: Path):
     notes = make_notes(tmp_path)
     llm = scripted_llm()

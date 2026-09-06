@@ -96,6 +96,15 @@ class Runner:
             claims, sub_gaps = extract_claims(self.llm, sub.text, evidence, researcher=notes)
             gaps.extend(sub_gaps)
             all_claims.extend(claims)
+            if not claims and f"no evidence found for: {sub.text}" not in sub_gaps:
+                # Evidence was fetched but nothing assertable was extracted
+                # and no named gap was recorded: this planned sub-question
+                # would otherwise vanish from the ledger entirely (no claim,
+                # no gap), which biases the A3 honest-failure denominator
+                # and hides the plan from the report. Record it as a named
+                # gap so the plan stays observable (A3/report both key on
+                # "no evidence found for: <sub.text>").
+                gaps.append(f"no evidence found for: {sub.text}")
             self.log(f"    evidence {len(evidence)}, claims {len(claims)}")
             if len(all_claims) >= self.max_claims:
                 self.log("  claim cap reached; stopping research")
