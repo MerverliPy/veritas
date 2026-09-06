@@ -84,6 +84,21 @@ def test_supporting_sources_empty_marks_none_supporting(tmp_path: Path):
     assert c.evidence[1].supports is False
 
 
+def test_nonsupported_verdict_clears_support_flags(tmp_path: Path):
+    """partial/contradicted/unsupported claims must not leave their evidence
+    reading as supporting in the ledger when the field is absent (Codex
+    round-9 P2)."""
+    llm = FakeLLM({VERIFY_SYSTEM: json.dumps({
+        "verdict": "partial", "reason": "says most not all",
+        "better_statement": "most widgets work"})})
+    provs = build_providers([Surface.LOCAL], local_root=tmp_path)
+    c = _two_file_claim(tmp_path)
+    verify_claim(llm, c, {Surface.LOCAL: provs[0]})
+    assert c.verdict is Verdict.PARTIAL
+    assert c.evidence[0].supports is False
+    assert c.evidence[1].supports is False
+
+
 def test_partial_low_with_correction(tmp_path: Path):
     llm = FakeLLM({VERIFY_SYSTEM: json.dumps(
         {"verdict": "partial", "reason": "says most not all",

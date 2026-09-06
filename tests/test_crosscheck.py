@@ -183,6 +183,21 @@ def test_reconcile_role_reversal_defers():
     assert xc in result["candidates"]
 
 
+def test_reconcile_comparison_signs_are_preserved():
+    """Semantic operators carry meaning: '>20' vs '<20' (or '+20' vs '-20')
+    must NOT normalize to the same string — a verified opposite comparison
+    defers to the conflict detector (Codex round-9 P1)."""
+    for pc_stmt, xc_stmt in (("Output was >20 units", "Output was <20 units"),
+                             ("Temperature was +20 degrees",
+                              "Temperature was -20 degrees")):
+        pc = claim(pc_stmt, "https://a.example/x")
+        xc = claim(xc_stmt, "https://b.example/y", cid="x1")
+        result = reconcile([pc], [xc])
+        assert result["corroborated"] == 0
+        assert pc.crosschecked is False
+        assert xc in result["candidates"]
+
+
 def test_reconcile_no_promotion_on_bundled_unsupporting_locator():
     """A cross claim verified on the SHARED source alone (its bundled new
     locator B was NOT found supporting) must not promote the primary via B,

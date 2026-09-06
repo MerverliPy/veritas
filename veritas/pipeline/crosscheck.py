@@ -55,12 +55,13 @@ def _sig_tokens(statement: str) -> set[str]:
 
 
 def _norm(statement: str) -> str:
-    """Normalized statement for AGREEMENT: lowercase, punctuation stripped,
-    whitespace collapsed. Corroboration requires the cross claim to be a
-    VERBATIM re-derivation — role reversals ('A beats B' vs 'B beats A'),
-    different values, added qualifiers and negations all differ as strings,
-    so they defer to the semantic/conflict path instead of being consumed."""
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ",
+    """Normalized statement for AGREEMENT: lowercase, whitespace collapsed,
+    punctuation stripped EXCEPT semantic comparison operators (< > + - = ~
+    and sign variants) which carry the claim's meaning — '>20 degrees' vs
+    '<20 degrees' (or '+20' vs '-20') must stay different strings. Anything
+    that differs after normalization defers to the semantic/conflict path
+    instead of being consumed (Codex round-8/9 P1)."""
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 <>+=~±≤≥]", " ",
                                          statement.lower())).strip()
 
 
