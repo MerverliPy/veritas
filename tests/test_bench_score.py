@@ -1218,6 +1218,11 @@ def test_d2_radio_priority_claims_never_certified():
     assert gold_verdict("In 1943, the United States Supreme Court invalidated "
                         "claim 16 of Marconi's patent 763,772.",
                         expected) != "correct"
+    assert gold_verdict("In 1943, the United States Supreme Court held claim "
+                        "16 of Marconi's patent 763,772 unenforceable.",
+                        expected) != "correct"
+    assert gold_verdict("Guglielmo Marconi and Nikola Tesla won the 1909 "
+                        "Nobel Prize in Physics.", expected) == "incorrect"
     # 'No.' patent abbreviation is not a negation (round-8 P2 matcher fix)
     assert gold_verdict("Tesla's patent No. 645,576 for wireless "
                         "transmission was filed in 1897 and granted in "
@@ -1432,6 +1437,8 @@ def test_status_antonym_and_synonym_matching():
     assert _antonym_conflict("claims 10 and 11 are invalid",
                              "claims 10 and 11 are valid")
     assert _antonym_conflict("the Court invalidated claim 16",
+                             "claim 16 was valid and infringed")
+    assert _antonym_conflict("held claim 16 unenforceable",
                              "claim 16 was valid and infringed")
     assert not _antonym_conflict("the patent was granted in 1900",
                                  "the patent was granted in 1901")

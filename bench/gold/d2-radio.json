@@ -74,6 +74,12 @@
       "note": "Concise form of the wrong-co-recipient falsehood (the Physics prize was shared with Braun, not Tesla). Wording deliberately carries no 'wireless/telegraphy' tokens so a true concise Marconi-only claim stays below the match bar while an 'X and Y shared/won' claim matches this entry above the correct concise variant."
     },
     {
+      "statement": "Guglielmo Marconi and Nikola Tesla won the 1909 Nobel Prize in Physics.",
+      "gold_label": "incorrect",
+      "confidence_class": "unsupported",
+      "note": "Full-name form of the wrong-co-recipient falsehood (Braun, not Tesla, shared the 1909 Physics prize with Marconi). Needed because a full-name pairing claim out-shares the short-name guard against the Marconi-only correct variant; verbatim claims match this entry at similarity 1.0."
+    },
+    {
       "statement": "Guglielmo Marconi received the 1909 Nobel Prize in Physics in recognition of his contributions to wireless telegraphy.",
       "variant_of": "Guglielmo Marconi shared the 1909 Nobel Prize in Physics with Karl Ferdinand Braun in recognition of their contributions to the development of wireless telegraphy.",
       "gold_label": "correct",
