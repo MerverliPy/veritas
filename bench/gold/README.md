@@ -72,10 +72,13 @@ scores each mission ledger against the sheet at `bench/gold/<query_id>.json`
 
 ## Current sheets
 
-All six seed query sheets are **AUDITED (2026-09-06)**: labels and anchor
+All seven query sheets are **AUDITED (2026-09-06)**: labels and anchor
 facts were independently re-verified against the public record (each sheet's
 `note` cites the sources; the u1 anchor correction, the u2 added
-54-locomotive anchor, and the f1 contested-relabel rationale are recorded in
-the files). Sheets are owner-curated scoring data the pipeline never reads;
-any future label change should update the per-sheet `note` the same way.
-`f1-wannacry` supersedes the earlier illustrative example.
+54-locomotive anchor, the f1 contested-relabel rationale, and the d2-radio
+1943-Supreme-Court anchors are recorded in the files). `d2-radio` was added
+as the second class-D query (A4 re-spec: contradiction pass fires on >= half
+the paired D queries) and mirrors the d1-telephone sheet shape. Sheets are
+owner-curated scoring data the pipeline never reads; any future label change
+should update the per-sheet `note` the same way. `f1-wannacry` supersedes
+the earlier illustrative example.

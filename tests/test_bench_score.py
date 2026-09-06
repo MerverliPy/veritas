@@ -1102,12 +1102,30 @@ def test_real_seed_gold_sheets_pass_preflight():
     repo = Path(__file__).resolve().parents[1]
     spec = json.loads((repo / "bench" / "queries.json").read_text())
     queries = spec["queries"]
-    assert len(queries) == 6
+    assert len(queries) == 7
     for q in queries:
         assert (repo / "bench" / "gold" / f"{q['id']}.json").exists(), \
             f"seed query {q['id']} has no gold sheet"
     errs = preflight_errors(queries, repo / "bench" / "gold")
     assert errs == [], f"gold pre-flight errors: {errs}"
+
+
+def test_d2_radio_priority_claims_never_certified():
+    """d2 regression: flat one-sided 'X invented the radio' claims must
+    resolve to contested entries, never gain correct credit by matching the
+    Tesla-patent or 1943-Supreme-Court anchors (mirror of the d1 test)."""
+    repo = Path(__file__).resolve().parents[1]
+    g = json.loads((repo / "bench" / "gold" / "d2-radio.json").read_text())
+    expected = g["expected_claims"]
+    assert gold_verdict("Guglielmo Marconi invented the radio.",
+                        expected) == "contested"
+    assert gold_verdict("Nikola Tesla invented the radio, not Marconi.",
+                        expected) == "contested"
+    # the neutral patent anchor still matches when asserted verbatim-ish
+    assert gold_verdict("In 1900 the United States Patent Office granted "
+                        "Nikola Tesla patent number 645,576 for a wireless "
+                        "transmission system, on an application filed on "
+                        "2 September 1897.", expected) == "correct"
 
 
 def test_priority_claim_never_certified_by_patent_fact():
