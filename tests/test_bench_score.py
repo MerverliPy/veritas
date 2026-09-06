@@ -1309,6 +1309,16 @@ def test_d2_radio_priority_claims_never_certified():
                         "receiving a transatlantic wireless signal at St "
                         "John's, Newfoundland, transmitted from his station "
                         "at Poldhu, Cornwall.", expected) == "correct"
+    # round 23: named_winners makes co-recipient identity truth-critical;
+    # fused false tails get no lexical credit (judge arbitrates fusions)
+    assert gold_verdict("Guglielmo Marconi and Alexander Popov won the 1909 "
+                        "Nobel Prize in Physics.", expected) == "incorrect"
+    assert gold_verdict("Guglielmo Marconi and Oliver Lodge won the 1909 "
+                        "Nobel Prize in Physics.", expected) != "correct"
+    assert gold_verdict("In 1943 the United States Supreme Court held claim "
+                        "16 of Marconi's patent number 763,772 valid but "
+                        "noninfringed, while claims 10 and 11 were invalid.",
+                        expected) != "correct"
     # 'No.' patent abbreviation is not a negation (round-8 P2 matcher fix)
     assert gold_verdict("Tesla's patent No. 645,576 for wireless "
                         "transmission was filed in 1897 and granted in "

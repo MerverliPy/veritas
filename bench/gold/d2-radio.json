@@ -45,58 +45,100 @@
       "statement": "Guglielmo Marconi shared the 1909 Nobel Prize in Physics with Karl Ferdinand Braun in recognition of their contributions to the development of wireless telegraphy.",
       "gold_label": "correct",
       "confidence_class": "high",
-      "note": "Marconi-side documented record (not a priority verdict), so accurate claims about Marconi's contribution have a correct target and D-class reliability is not one-sided. Independently verifiable (Nobel Foundation). Phrased without any 'invented the radio' wording so a flat one-sided credit claim cannot token-match it."
+      "note": "Marconi-side documented record (not a priority verdict), so accurate claims about Marconi's contribution have a correct target and D-class reliability is not one-sided. Independently verifiable (Nobel Foundation). Phrased without any 'invented the radio' wording so a flat one-sided credit claim cannot token-match it.",
+      "named_winners": [
+        "Guglielmo Marconi",
+        "Karl Ferdinand Braun"
+      ]
     },
     {
       "statement": "Marconi and Braun shared the 1909 Nobel Prize in Physics.",
       "variant_of": "Guglielmo Marconi shared the 1909 Nobel Prize in Physics with Karl Ferdinand Braun in recognition of their contributions to the development of wireless telegraphy.",
       "gold_label": "correct",
       "confidence_class": "medium",
-      "note": "Concise co-recipient phrasing of the Nobel record so the natural 'X and Y shared the 1909 Nobel Prize in Physics' formulation credits the correct Braun pairing (and outranks the wrong-co-recipient Tesla guard) without inflating the recall denominator."
+      "note": "Concise co-recipient phrasing of the Nobel record so the natural 'X and Y shared the 1909 Nobel Prize in Physics' formulation credits the correct Braun pairing (and outranks the wrong-co-recipient Tesla guard) without inflating the recall denominator.",
+      "named_winners": [
+        "Guglielmo Marconi",
+        "Karl Ferdinand Braun"
+      ]
     },
     {
       "statement": "Guglielmo Marconi won the 1909 Nobel Prize in Physics.",
       "variant_of": "Guglielmo Marconi shared the 1909 Nobel Prize in Physics with Karl Ferdinand Braun in recognition of their contributions to the development of wireless telegraphy.",
       "gold_label": "correct",
       "confidence_class": "medium",
-      "note": "Concise Marconi-only phrasing of the Nobel record (no co-recipient or field detail), so a common accurate statement outranks the wrong-co-recipient Tesla guard instead of being captured by it."
+      "note": "Concise Marconi-only phrasing of the Nobel record (no co-recipient or field detail), so a common accurate statement outranks the wrong-co-recipient Tesla guard instead of being captured by it.",
+      "named_winners": [
+        "Guglielmo Marconi"
+      ]
     },
     {
       "statement": "Guglielmo Marconi shared the 1909 Nobel Prize in Physics with Nikola Tesla in recognition of their contributions to the development of wireless telegraphy.",
       "gold_label": "incorrect",
       "confidence_class": "unsupported",
-      "note": "The 1909 Physics prize was shared with Karl Ferdinand Braun, not Nikola Tesla — a plausible conflation in a Marconi-versus-Tesla report. Verbatim claims match this entry at higher similarity than the correct Braun anchor, so the wrong co-recipient cannot ride its tokens to credit."
+      "note": "The 1909 Physics prize was shared with Karl Ferdinand Braun, not Nikola Tesla — a plausible conflation in a Marconi-versus-Tesla report. Verbatim claims match this entry at higher similarity than the correct Braun anchor, so the wrong co-recipient cannot ride its tokens to credit.",
+      "named_winners": [
+        "Guglielmo Marconi",
+        "Nikola Tesla"
+      ]
     },
     {
       "statement": "Marconi and Tesla shared the 1909 Nobel Prize in Physics.",
       "gold_label": "incorrect",
       "confidence_class": "unsupported",
-      "note": "Concise form of the wrong-co-recipient falsehood (the Physics prize was shared with Braun, not Tesla). Wording deliberately carries no 'wireless/telegraphy' tokens so a true concise Marconi-only claim stays below the match bar while an 'X and Y shared/won' claim matches this entry above the correct concise variant."
+      "note": "Concise form of the wrong-co-recipient falsehood (the Physics prize was shared with Braun, not Tesla). Wording deliberately carries no 'wireless/telegraphy' tokens so a true concise Marconi-only claim stays below the match bar while an 'X and Y shared/won' claim matches this entry above the correct concise variant.",
+      "named_winners": [
+        "Guglielmo Marconi",
+        "Nikola Tesla"
+      ]
     },
     {
       "statement": "Guglielmo Marconi and Nikola Tesla won the 1909 Nobel Prize in Physics.",
       "gold_label": "incorrect",
       "confidence_class": "unsupported",
-      "note": "Full-name form of the wrong-co-recipient falsehood (Braun, not Tesla, shared the 1909 Physics prize with Marconi). Needed because a full-name pairing claim out-shares the short-name guard against the Marconi-only correct variant; verbatim claims match this entry at similarity 1.0."
+      "note": "Full-name form of the wrong-co-recipient falsehood (Braun, not Tesla, shared the 1909 Physics prize with Marconi). Needed because a full-name pairing claim out-shares the short-name guard against the Marconi-only correct variant; verbatim claims match this entry at similarity 1.0.",
+      "named_winners": [
+        "Guglielmo Marconi",
+        "Nikola Tesla"
+      ]
+    },
+    {
+      "statement": "Guglielmo Marconi and Alexander Popov won the 1909 Nobel Prize in Physics.",
+      "gold_label": "incorrect",
+      "confidence_class": "unsupported",
+      "named_winners": [
+        "Guglielmo Marconi",
+        "Alexander Popov"
+      ],
+      "note": "Wrong co-recipient: the 1909 Physics prize was shared with Karl Ferdinand Braun, never Alexander Popov (a plausible substitution given the Popov-credit tradition in Russian historiography of radio). The named_winners schema field makes co-recipient identity truth-critical for award facts; verbatim claims match this entry at similarity 1.0."
     },
     {
       "statement": "Guglielmo Marconi received the 1909 Nobel Prize in Physics in recognition of his contributions to wireless telegraphy.",
       "variant_of": "Guglielmo Marconi shared the 1909 Nobel Prize in Physics with Karl Ferdinand Braun in recognition of their contributions to the development of wireless telegraphy.",
       "gold_label": "correct",
       "confidence_class": "high",
-      "note": "Concise alternate phrasing of the Nobel record so natural wording credits the same fact in lexical modes without inflating the recall denominator."
+      "note": "Concise alternate phrasing of the Nobel record so natural wording credits the same fact in lexical modes without inflating the recall denominator.",
+      "named_winners": [
+        "Guglielmo Marconi"
+      ]
     },
     {
       "statement": "Guglielmo Marconi received the 1909 Nobel Prize in Chemistry in recognition of his contributions to wireless telegraphy.",
       "gold_label": "incorrect",
       "confidence_class": "unsupported",
-      "note": "Wrong prize category: the 1909 award was the Nobel Prize in Physics (shared with Karl Ferdinand Braun), never Chemistry. Verbatim claims match this entry at higher similarity than the correct Physics variant, so the false category cannot ride the correct entry's tokens to credit."
+      "note": "Wrong prize category: the 1909 award was the Nobel Prize in Physics (shared with Karl Ferdinand Braun), never Chemistry. Verbatim claims match this entry at higher similarity than the correct Physics variant, so the false category cannot ride the correct entry's tokens to credit.",
+      "named_winners": [
+        "Guglielmo Marconi"
+      ]
     },
     {
       "statement": "Guglielmo Marconi received the 1909 Nobel Prize in Physics in recognition that he invented the radio.",
       "gold_label": "contested",
       "confidence_class": "low",
-      "note": "Fused claim turning the Nobel record into a one-sided invention verdict (the Nobel recognized contributions to wireless telegraphy, not 'that he invented the radio'). Disputed; never scored correct or incorrect. Competing contested formulation so lexical modes downgrade the fusion away from the correct Nobel variant."
+      "note": "Fused claim turning the Nobel record into a one-sided invention verdict (the Nobel recognized contributions to wireless telegraphy, not 'that he invented the radio'). Disputed; never scored correct or incorrect. Competing contested formulation so lexical modes downgrade the fusion away from the correct Nobel variant.",
+      "named_winners": [
+        "Guglielmo Marconi"
+      ]
     },
     {
       "statement": "In Marconi Wireless Telegraph Co. of America v. United States (1943), the United States Supreme Court held claims 10 and 11 of Marconi's patent number 763,772 invalid as anticipated by the earlier patent of the American inventor John Stone Stone.",
@@ -134,7 +176,10 @@
       "statement": "Guglielmo Marconi won the Nobel Prize in Physics in 1909 for inventing radio.",
       "gold_label": "contested",
       "confidence_class": "low",
-      "note": "Fused claim turning the Nobel record into a one-sided invention verdict (the award recognized contributions to wireless telegraphy, not 'for inventing radio'). Disputed; never scored correct or incorrect. Competing contested formulation so lexical modes downgrade the 'won ... for inventing radio' fusion away from the correct Marconi-only 'won' variant."
+      "note": "Fused claim turning the Nobel record into a one-sided invention verdict (the award recognized contributions to wireless telegraphy, not 'for inventing radio'). Disputed; never scored correct or incorrect. Competing contested formulation so lexical modes downgrade the 'won ... for inventing radio' fusion away from the correct Marconi-only 'won' variant.",
+      "named_winners": [
+        "Guglielmo Marconi"
+      ]
     },
     {
       "statement": "In 1893 Nikola Tesla stated publicly that his wireless system could transmit intelligible signals or power to any distance without connecting wires.",

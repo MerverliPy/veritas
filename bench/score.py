@@ -213,9 +213,17 @@ _STATUS_CANON.update(_STATUS_SYNONYMS)
 
 def _scoped_statuses(text: str) -> dict[str, set[frozenset[int] | None]]:
     """Map each canonical status to the claim numbers it scopes to (None
-    when no numbered claim is near — a patent-level or unscoped status)."""
+    when no numbered claim is near — a patent-level or unscoped status).
+    Binding is CLAUSE-aware: statuses attach only to a claim phrase in the
+    same clause (clauses split on but/while/whereas/although/though/yet/;
+    /,/), so in a compound ruling 'claim 16 ... noninfringed, while claims
+    10 and 11 were invalid' the noninfringed status cannot migrate to the
+    other clause's claim numbers."""
     low = text.lower()
     words = [m.group(0) for m in re.finditer(r"[a-z0-9']+", low)]
+    clause_breaks = {i for i, w in enumerate(words) if w in (
+        "but", "while", "whereas", "although", "though", "yet",
+        "however", "nevertheless", "meanwhile")}
     # claim phrases: 'claim 16', 'claims 10 and 11' (token spans)
     phrases: list[tuple[tuple[int, int], frozenset[int]]] = []
     for i, w in enumerate(words):
@@ -236,9 +244,13 @@ def _scoped_statuses(text: str) -> dict[str, set[frozenset[int] | None]]:
         canon = _STATUS_CANON.get(w)
         if canon not in canons:
             continue
+        # nearest claim phrase in the SAME clause as this status
+        break_idx = max((b for b in clause_breaks if b < i), default=-1)
         scope: frozenset[int] | None = None
         best = 10 ** 9
         for span, ids in phrases:
+            if span[0] <= break_idx:
+                continue  # phrase belongs to an earlier clause
             d = min(abs(i - span[0]), abs(i - span[1]))
             if d < best:
                 best, scope = d, ids
@@ -253,8 +265,14 @@ def _antonym_conflict(statement: str, gold: str) -> bool:
     'claim 16 valid and infringed' vs 'claim 16 unenforceable', 'granted in
     1900' vs 'rejected in 1900'. Opposing statuses on DIFFERENT numbered
     claims ('claims 10 and 11 invalid, but claim 16 valid') do not
-    conflict. Unscoped (patent-level) statuses match any scope."""
+    conflict. Unscoped (patent-level) statuses match any scope. A claim
+    carrying an adverse void-family/noninfringed disposition never matches
+    an entry that asserts none, even when a true clause in the same fused
+    sentence overlaps (the false tail cannot ride the true clause)."""
     sa, ga = _scoped_statuses(statement), _scoped_statuses(gold)
+    if ({s for s in sa if s in ("void", "noninfringed")}
+            and not ({s for s in ga if s in ("void", "noninfringed")})):
+        return True
     for a, b in _CONFLICTING_STATUSES:
         aa, bb = sa.get(a), ga.get(b)
         if aa and bb and _scopes_conflict(aa, bb):
@@ -272,6 +290,51 @@ def _scopes_conflict(a: set[frozenset[int] | None],
     if None in a or None in b:
         return True
     return any(x & y for x in a for y in b)
+
+
+# ---------------------------------------------------------------------------
+# Named-participant identity (award facts): gold entries may declare the
+# canonical winners via ``named_winners`` (list of full names). A claim's
+# award-winner surnames must then be a subset of the entry's surnames — a
+# claim naming any other person as co-winner ('Marconi and Popov won the
+# 1909 Nobel Prize in Physics') never matches an entry whose winner set
+# lacks that person, however high the token overlap.
+_NAME = r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}"
+_AWARD_PAIR = re.compile(
+    r"\b(" + _NAME + r")\s+and\s+(" + _NAME + r")\s+"
+    r"(?:won|shared|received|were\s+awarded)\b")
+_AWARD_SINGLE = re.compile(
+    r"\b(" + _NAME + r")\s+(?:won|shared|received|was\s+awarded)\b")
+_AWARD_WITH = re.compile(r"\bwith\s+(" + _NAME + r")\b")
+_AWARD_VERB = re.compile(r"\b(?:won|shared|received|awarded)\b")
+
+
+def _claim_winners(text: str) -> set[str]:
+    """Surnames of people a claim names as award winners/recipients (via an
+    'X and Y won/shared/received' structure, a single 'X won/received', or
+    'shared ... with X'). Empty when the claim names no award winner."""
+    m = _AWARD_PAIR.search(text)
+    if m:
+        return {m.group(1).split()[-1], m.group(2).split()[-1]}
+    m = _AWARD_SINGLE.search(text)
+    out: set[str] = set()
+    if m:
+        out.add(m.group(1).split()[-1])
+    if _AWARD_VERB.search(text):
+        for w in _AWARD_WITH.finditer(text):
+            out.add(w.group(1).split()[-1])
+    return out
+
+
+def _winners_conflict(claim_winners: set[str], exp: dict) -> bool:
+    """True when the gold entry declares canonical winners and the claim
+    names a winner the entry does not (co-recipient identity is
+    truth-critical for award facts)."""
+    named = exp.get("named_winners")
+    if not named or not claim_winners:
+        return False
+    gold_surnames = {n.split()[-1] for n in named}
+    return not claim_winners <= gold_surnames
 
 
 def _quantities(text: str) -> set[str]:
@@ -348,13 +411,28 @@ def best_gold_match(statement: str, expected: list[dict]) -> dict | None:
     """Highest-overlap gold expected claim, if it is a genuine match.
 
     Overlap must survive truth-critical checks: a claim that contradicts
-    gold on a quantity (different year, port, or count for the same thing)
-    or has opposite polarity ("did not launch" vs "launched") is a
-    different claim and never scores as the gold statement — while a claim
-    that merely omits a gold detail still matches. Ties in overlap resolve
-    toward the less credit-worthy label (contested/incorrect over correct)
-    so ambiguity never certifies credit."""
+    gold on a quantity (different year, port, or count for the same thing),
+    swaps a status predicate for its antonym ('granted' vs 'rejected',
+    'valid' vs 'invalid'/'unenforceable', scoped to the same numbered
+    claim), reverses prior-art chronology ('earlier patent' vs 'later
+    patent'), or names an award co-recipient the gold entry's
+    ``named_winners`` does not include, is a different claim and never
+    scores as the gold statement — while a claim that merely omits a gold
+    detail still matches. Ties in overlap resolve toward the less
+    credit-worthy label (contested/incorrect over correct) so ambiguity
+    never certifies credit.
+
+    Scope boundary (documented, by design): a claim that FUSES two atomic
+    gold facts into one sentence ('claims 10 and 11 invalid, but claim 16
+    valid and infringed' — or a true fact fused with a false tail) cannot
+    be arbitrated here: token overlap with either atomic entry is
+    approximate and a false tail can ride a true clause. The LLM gold
+    judge (bench/judge.py, the default instrument) arbitrates fused claims
+    against the full gold set; this matcher only serves --no-judge runs
+    and judge-outage fallbacks, and it errs conservative (unmatched, not
+    credited) wherever the checks cannot decide."""
     sq, sneg = _quantities(statement), _negation_count(statement)
+    cw = _claim_winners(statement)
     best, best_sim = None, 0.0
     for exp in expected:
         st = exp["statement"]
@@ -367,6 +445,8 @@ def best_gold_match(statement: str, expected: list[dict]) -> dict | None:
             continue  # status predicate swapped for its antonym
         if _chronology_conflict(statement, st):
             continue  # prior-art chronology reversed ('earlier' vs 'later')
+        if _winners_conflict(cw, exp):
+            continue  # claim names an award co-recipient the gold entry does not
         if sneg != eneg:
             continue  # different negation scope/count is a different claim
         sim = _jaccard(statement, st)

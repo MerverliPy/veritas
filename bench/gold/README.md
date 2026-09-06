@@ -18,10 +18,22 @@ scores each mission ledger against the sheet at `bench/gold/<query_id>.json`
       "statement": "precise, independently verifiable claim",
       "gold_label": "correct | incorrect | contested",
       "confidence_class": "high | medium | low | unsupported",
-      "note": "why this label (optional)"
+      "note": "why this label (optional)",
+      "named_winners": ["Guglielmo Marconi", "Karl Ferdinand Braun"] (optional)
     }
   ]
 }
+
+## Optional: `named_winners` (award/attribution facts)
+
+For facts where a person's identity is truth-critical — who shared/won a
+prize, who a record belongs to — add `"named_winners": ["Full Name", ...]`
+to the expected claim. The lexical matcher then requires a claim's award
+co-recipients (from an "X and Y won/shared/received" structure) to be a
+subset of these names: a claim crediting a wrong co-recipient ("Marconi and
+Popov won ...") can never match, however high the token overlap. The LLM
+judge ignores the field (it reads the statement) but benefits from the
+precise wording.`
 ```
 
 ## Rules
