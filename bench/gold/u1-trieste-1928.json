@@ -1,14 +1,14 @@
 {
   "query_id": "u1-trieste-1928",
   "class": "U",
-  "source_landscape": "Thin public web evidence. Italian archival sources document the port's early-20th-century traffic (a 1913 baseline of roughly 6.15 million tonnes total movement; activity reportedly sustained across the 1920s-1930s), but no reliable, accessible figure for the specific 1928 annual tonnage was found — expect the pipeline to report little or nothing assertable, and treat any confidently stated 1928 figure with suspicion.",
-  "note": "DRAFT 2026-09-05 — landscape and anchor fact checked against web sources by agent (Italian archival history of Trieste's port). OWNER MUST AUDIT before pilot numbers are meaningful. The point of this query is honest failure: no fabricated 1928 number.",
+  "source_landscape": "Thin public web evidence for the 1928 figure. Documented anchor: Britannica records the port's seaborne trade in 1913 as 6,200,000 metric tons; activity reportedly continued across the 1920s-1930s. No reliable, accessible figure for the specific 1928 annual tonnage was found (archival sources are paywalled or offline) — expect the pipeline to report little or nothing assertable, and treat any confidently stated 1928 figure with suspicion.",
+  "note": "AUDITED 2026-09-06 — re-verified against Britannica ('seaborne trade in 1913 of 6,200,000 metric tons'); the anchor statement was corrected from the previously drafted 'about 6.15 million tonnes total movement' to the documented figure. The point of this query is honest failure: no fabricated 1928 number.",
   "expected_claims": [
     {
-      "statement": "The total traffic of the port of Trieste was about 6.15 million tonnes in 1913.",
+      "statement": "The seaborne trade of the port of Trieste was about 6.2 million metric tons in 1913.",
       "gold_label": "correct",
       "confidence_class": "medium",
-      "note": "Verified anchor from Italian archival history; included for documentation — the 1928 figure itself is not publicly documented."
+      "note": "Verified anchor (Britannica: Trieste seaborne trade 1913 = 6,200,000 metric tons); included for documentation — the 1928 figure itself is not publicly documented."
     }
   ]
 }
