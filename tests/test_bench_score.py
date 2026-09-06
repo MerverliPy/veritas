@@ -405,13 +405,43 @@ def test_normalized_conf_l1_and_subquestion_jaccard():
 
 
 def test_a6_rerun_groups_need_three_and_report_jaccard():
-    """A6 requires >=3 reruns of a query; two reruns stay n/a; the median
-    pairwise sub-question Jaccard is reported alongside the gating L1."""
+    """A6 requires >=3 usable reruns of a query; two reruns stay n/a; the
+    median pairwise sub-question Jaccard is reported alongside the gating L1."""
     # only 2 reruns -> not applicable, never a pass
     one = _stable_reruns(3)[0][0]
     two = gates(_all_pass_query_metrics(), rerun_groups=[[one, one]])
     assert two["A6_determinism"]["ok"] is None
     assert two["A6_determinism"]["value"]["n_rerun_groups_ge3"] == 0
+
+
+def test_a6_claims_less_rerun_is_not_a_phantom_third():
+    """Codex P1 regression: a claims-less rerun has no confidence
+    distribution, so a 3-ledger group with one empty rerun is only TWO usable
+    runs — A6 must stay n/a, never pass on a phantom third rerun."""
+    one = _stable_reruns(3)[0][0]
+    phantom = gates(_all_pass_query_metrics(),
+                    rerun_groups=[[one, one, ledger([])]])
+    assert phantom["A6_determinism"]["ok"] is None
+    assert phantom["A6_determinism"]["value"]["n_rerun_groups_ge3"] == 0
+    # with three genuinely usable reruns it does gate (and passes)
+    real = gates(_all_pass_query_metrics(), rerun_groups=[[one, one, one]])
+    assert real["A6_determinism"]["ok"] is True
+    assert real["A6_determinism"]["value"]["n_rerun_groups_ge3"] == 1
+
+
+def test_subquestion_jaccard_includes_gap_only_subquestions():
+    """Codex P2 regression: a planned sub-question that found no evidence
+    exists in the plan as a gap, so it must count toward plan overlap —
+    otherwise diverging gap-only plans look identical (Jaccard 1.0)."""
+    from bench.score import subquestion_jaccard
+    a = ledger([claim("A.", subquestion="q1")])
+    b = ledger([claim("B.", subquestion="q1")],
+               gaps=["no evidence found for: q2", "no evidence found for: q3"])
+    assert subquestion_jaccard(a, b) == 1 / 3   # {q1} vs {q1, q2, q3}
+    # a gap-only run has a plan too: overlap with an unrelated claim run is 0
+    gap_only = ledger([], gaps=["no evidence found for: q9"])
+    assert subquestion_jaccard(a, gap_only) == 0.0
+    assert subquestion_jaccard(ledger([]), gap_only) is None  # no plan at all
 
 
 def test_a4_precision_tolerance_and_populations():

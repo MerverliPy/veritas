@@ -414,11 +414,7 @@ def _subquestion_honest_failure(m: dict, ledger: dict) -> None:
     for c in claims:
         key = (c.get("subquestion") or "").strip()
         by_sq.setdefault(key, []).append(c)
-    gap_named = [
-        g.split("no evidence found for: ", 1)[1].strip()
-        for g in ledger.get("gaps", [])
-        if g.startswith("no evidence found for: ")
-    ]
+    gap_named = _gap_named_subquestions(ledger)
     names = set(by_sq) | {g for g in gap_named if g}
     unresolved = 0
     for name in names:
@@ -500,13 +496,29 @@ def normalized_conf_l1(ledger_a: dict, ledger_b: dict) -> float | None:
     return 0.5 * sum(abs(pa[k] - pb[k]) for k in CONFIDENCE_ORDER)
 
 
+def _gap_named_subquestions(ledger: dict) -> list[str]:
+    """Sub-question texts the runner recorded as finding no evidence
+    (``gaps = ["no evidence found for: <sub.text>"]``) — a planned
+    sub-question that produced no claims. Shared by the A3 honest-failure
+    universe and the A6 plan-overlap sets so both see the same plan."""
+    return [
+        g.split("no evidence found for: ", 1)[1].strip()
+        for g in ledger.get("gaps", [])
+        if g.startswith("no evidence found for: ")
+    ]
+
+
 def subquestion_jaccard(ledger_a: dict, ledger_b: dict) -> float | None:
     """Jaccard of the two reruns' sub-question statement sets (plan overlap,
-    re-spec A6(b)). None when either run has no sub-question text."""
+    re-spec A6(b)). The universe includes both claim-backed sub-questions and
+    gap-named ones (a planned sub-question that found no evidence still
+    exists in the plan). None when either run has no sub-question text."""
     def _sq(ledger: dict) -> set[str]:
-        return {c.get("subquestion", "").strip()
-                for c in ledger.get("claims", [])
-                if (c.get("subquestion") or "").strip()}
+        named = {c.get("subquestion", "").strip()
+                 for c in ledger.get("claims", [])
+                 if (c.get("subquestion") or "").strip()}
+        named |= {g for g in _gap_named_subquestions(ledger) if g}
+        return named
     sa, sb = _sq(ledger_a), _sq(ledger_b)
     if not sa or not sb:
         return None
@@ -694,10 +706,16 @@ def gates(q_metrics: list[dict], *,
     jac_vals: list[float] = []
     n_groups_ge3 = 0
     for group in rerun_groups or []:
-        if len(group) < 3:
-            continue          # distribution determinism needs >=3 reruns
+        # Filter to ledgers with a usable confidence distribution FIRST: a
+        # claims-less rerun would otherwise count toward the three-rerun
+        # minimum while contributing nothing, letting two identical runs pass
+        # A6 on a phantom third rerun (Codex P1).
+        usable = [ledger for ledger in group
+                  if _confidence_proportions(ledger) is not None]
+        if len(usable) < 3:
+            continue          # distribution determinism needs >=3 usable reruns
         n_groups_ge3 += 1
-        for a, b in combinations(group, 2):
+        for a, b in combinations(usable, 2):
             d = normalized_conf_l1(a, b)
             if d is not None:
                 l1_vals.append(d)
