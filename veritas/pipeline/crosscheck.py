@@ -56,16 +56,16 @@ def _jaccard(a: set, b: set) -> float:
 def _adopt_evidence(target: Claim, donor: Claim) -> None:
     """Merge the donor claim's evidence onto the target, keeping only the
     first entry per source locator. Call only with VERIFIED-supported donors
-    (the semantic pass): a consumed corroborating claim's evidence must stay
-    on the claim it promoted rather than vanish with the dropped claim — but
-    unverified lexical matches must never feed evidence into a verified
-    primary (Codex P1)."""
+    (reconcile and the semantic pass run after verify_claim): a consumed
+    corroborating claim's evidence must stay on the claim it promoted rather
+    than vanish with the dropped claim (Codex P1). Fresh evidence is
+    PREPENDED so the independent corroborating source lands inside
+    render_report's first-N evidence window instead of after it (Codex P2)."""
     have = {e.source.locator() for e in target.evidence}
-    for e in donor.evidence:
-        loc = e.source.locator()
-        if loc not in have:
-            target.evidence.append(e)
-            have.add(loc)
+    fresh = [e for e in donor.evidence
+             if e.source.locator() not in have]
+    if fresh:
+        target.evidence[0:0] = fresh
 
 
 def run_crosscheck(
@@ -142,6 +142,8 @@ def run_crosscheck(
     sem_flags, sem_promos, sem_pairs = corroborate_from_semantic(
         llm, eligible_primary, eligible_cross)
     consumed = {id(xc) for _pc, xc in sem_pairs}
+    # consumed cross claims are NOT lost: corroborate_from_semantic already
+    # adopted each donor's evidence onto its matched primary above
 
     appended = 0
     for cand in candidates:

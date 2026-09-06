@@ -54,8 +54,14 @@ claims — independent agreement that a second research run re-derived.
 
 Rules:
 - A match is only when both claims assert the same checkable fact (same subject
-  AND same substance: date, number, mechanism, attribution). Paraphrase, added
-  detail, or different wording is fine; a different fact is not.
+  AND same substance: date, number, mechanism, attribution). Paraphrase or
+  different wording is fine; a different fact is not.
+- The cross claim must cover EVERY material detail the primary asserts: a
+  vaguer restatement that drops the primary's number, date, mechanism or
+  attribution is NOT independent corroboration of the specific claim and must
+  not be matched (e.g. primary "reduced mortality by 20%" vs cross "reduced
+  mortality" is not a match — the 20% figure rests on the primary's source
+  alone).
 - Never match claims that contradict each other (opposite polarity, incompatible
   numbers or dates) — those belong to the conflict detector, not here.
 - Match only genuine agreement: claims that merely share a topic or a source do

@@ -150,6 +150,9 @@ class Runner:
                     subquestion_limit=max(2, self.max_subquestions // 2),
                     evidence_limit=max(4, self.evidence_per_subquestion // 2),
                     primary_subquestions=[s.text for s in plan.subquestions],
+                    # the asserted claims too: an open-ended request's
+                    # sub-questions alone cannot tell the counter-evidence
+                    # planner which date/number/attribution to challenge
                     primary_claims=[c.statement for c in verified
                                     if c.verdict in (Verdict.SUPPORTED,
                                                      Verdict.PARTIAL)],
