@@ -495,9 +495,9 @@ def test_select_queries_reports_unknown_ids():
     assert chosen == [] and unknown == ["nope"]
 
 
-def _write_scorecard(run_dir, entries):
+def _write_scorecard(run_dir, entries, *, crosscheck="off"):
     (run_dir / "scorecard.json").write_text(json.dumps(
-        {"provenance": {}, "queries": entries}))
+        {"provenance": {"crosscheck": crosscheck}, "queries": entries}))
 
 
 def test_load_paired_metrics_injects_query_id(tmp_path):
@@ -508,15 +508,57 @@ def test_load_paired_metrics_injects_query_id(tmp_path):
     arm.mkdir()
     _write_scorecard(arm, [
         {"id": "f1", "ok": True, "metrics": {"class": "F",
-                                                "precision_supported": 1.0}},
+                                                "precision_supported": 1.0},
+         "query": "q f1", "class": "F"},
         {"id": "u1", "ok": False, "metrics": {}},   # failed -> excluded
-        {"id": "d1", "ok": True, "metrics": {"class": "D"}},
+        {"id": "d1", "ok": True, "metrics": {"class": "D"},
+         "query": "q d1", "class": "D"},
     ])
-    out = load_paired_metrics(arm)
+    expected = [{"id": "f1", "query": "q f1", "class": "F"},
+                {"id": "d1", "query": "q d1", "class": "D"}]
+    out = load_paired_metrics(arm, require_crosscheck="off",
+                              expected=expected)
     assert [m.get("query_id") for m in out] == ["f1", "d1"]
     assert [m.get("class") for m in out] == ["F", "D"]
     with pytest.raises(ValueError):
         load_paired_metrics(tmp_path / "missing")
+
+
+def test_load_paired_metrics_rejects_wrong_arm_or_drift(tmp_path):
+    """Codex: paired metrics must come from the OPPOSITE cross-check arm and
+    match the main arm's query text/class — unrelated missions or two enabled
+    arms must never pair into an A4 gate."""
+    from bench.run_benchmark import load_paired_metrics
+    arm = tmp_path / "paired"
+    arm.mkdir()
+    base = [{"id": "f1", "ok": True, "metrics": {"class": "F"},
+             "query": "q f1", "class": "F"}]
+    expected = [{"id": "f1", "query": "q f1", "class": "F"}]
+    # same-arm (crosscheck on) must be rejected when an off-arm is required
+    _write_scorecard(arm, base, crosscheck="on")
+    with pytest.raises(ValueError, match="must be the OTHER arm"):
+        load_paired_metrics(arm, require_crosscheck="off",
+                            expected=expected)
+    # query text drift must be rejected
+    _write_scorecard(arm, base, crosscheck="off")
+    drifted = [{"id": "f1", "query": "a DIFFERENT question", "class": "F"}]
+    with pytest.raises(ValueError, match="text drifted"):
+        load_paired_metrics(arm, require_crosscheck="off",
+                            expected=drifted)
+    # class drift must be rejected
+    cls_drifted = [{"id": "f1", "query": "q f1", "class": "U"}]
+    with pytest.raises(ValueError, match="class drifted"):
+        load_paired_metrics(arm, require_crosscheck="off",
+                            expected=cls_drifted)
+    # a query absent from the main arm must be rejected
+    extra = [{"id": "zz", "ok": True, "metrics": {"class": "F"},
+              "query": "q zz", "class": "F"},
+             {"id": "f1", "ok": True, "metrics": {"class": "F"},
+              "query": "q f1", "class": "F"}]
+    _write_scorecard(arm, extra, crosscheck="off")
+    with pytest.raises(ValueError, match="not in the main"):
+        load_paired_metrics(arm, require_crosscheck="off",
+                            expected=expected)
 
 
 def test_collect_rerun_groups_requires_three_same_query_ledgers(tmp_path):
@@ -533,17 +575,38 @@ def test_collect_rerun_groups_requires_three_same_query_ledgers(tmp_path):
         (d / "f1" / "ledger.json").write_text(json.dumps(
             {"claims": [{"statement": f"run {i}", "verdict": "supported",
                           "confidence": "medium", "subquestion": "q1"}],
+             "query": "q f1",
              "confidence_counts": {"medium": 1}}))
         if i < 2:
             (d / "u1").mkdir()
             (d / "u1" / "ledger.json").write_text(json.dumps(
-                {"claims": [], "confidence_counts": {}}))
-    groups = collect_rerun_groups(dirs, ["f1", "u1"])
+                {"query": "q u1", "claims": [], "confidence_counts": {}}))
+    queries = [{"id": "f1", "query": "q f1"},
+               {"id": "u1", "query": "q u1"}]
+    groups = collect_rerun_groups(dirs, queries)
     assert len(groups) == 1 and len(groups[0]) == 3      # only f1 qualifies
     # a corrupt rerun is skipped: f1 drops to 2 usable -> no group forms
     (dirs[1] / "f1" / "ledger.json").write_text("not json{{")
-    groups2 = collect_rerun_groups(dirs, ["f1"])
-    assert groups2 == []                                  # <3 usable reruns
+    groups2 = collect_rerun_groups(dirs, queries)
+    assert len(groups2) == 0                            # <3 usable reruns
+
+
+def test_collect_rerun_groups_skips_mismatched_query_ledgers(tmp_path):
+    """Codex: a rerun ledger whose embedded query text differs from the
+    expected query is a different mission and must not count toward A6."""
+    from bench.run_benchmark import collect_rerun_groups
+    dirs = []
+    for name in ("det-1", "det-2", "det-3", "det-4"):
+        d = tmp_path / name
+        (d / "f1").mkdir(parents=True)
+        dirs.append(d)
+    for i, d in enumerate(dirs):
+        text = "q f1" if i < 3 else "a DIFFERENT question"
+        (d / "f1" / "ledger.json").write_text(json.dumps(
+            {"query": text, "claims": [], "confidence_counts": {"high": 1}}))
+    queries = [{"id": "f1", "query": "q f1"}]
+    groups = collect_rerun_groups(dirs, queries)
+    assert len(groups) == 1 and len(groups[0]) == 3     # mismatched one skipped
 
 
 

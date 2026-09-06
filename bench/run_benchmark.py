@@ -53,15 +53,19 @@ from bench.score import (  # noqa: E402
 _GOLD_LABELS = ("correct", "incorrect", "contested")
 
 
-def _load_optional_paired(paired_arm: str | None,
-                          parser=None) -> list[dict] | None:
+def _load_optional_paired(paired_arm: str | None, *, parser=None,
+                          require_crosscheck: str | None = None,
+                          expected: list[dict] | None = None) \
+        -> list[dict] | None:
     """Resolve --paired-arm to the other arm's metric list (A4 same-query
     pairing) or None. Errors abort loudly — a silently-ignored paired arm
     would report A4 as n/a and look like a real result."""
     if not paired_arm:
         return None
     try:
-        out = load_paired_metrics(paired_arm)
+        out = load_paired_metrics(paired_arm,
+                                  require_crosscheck=require_crosscheck,
+                                  expected=expected)
     except (ValueError, OSError) as e:
         if parser is not None:
             parser.error(f"paired arm rejected: {e}")
@@ -71,7 +75,7 @@ def _load_optional_paired(paired_arm: str | None,
     return out
 
 
-def _load_optional_reruns(rerun_dirs: str | None, parser=None,
+def _load_optional_reruns(rerun_dirs: str | None, *, parser=None,
                           queries: list[dict] | None = None) \
         -> list[list[dict]] | None:
     """Resolve --rerun-dirs into A6 rerun groups (>=3 same-query ledgers)."""
@@ -80,46 +84,86 @@ def _load_optional_reruns(rerun_dirs: str | None, parser=None,
     dirs = [Path(s) for s in rerun_dirs.split(",") if s.strip()]
     if len(dirs) < 3 and parser is not None:
         parser.error("determinism needs at least 3 rerun dirs (--rerun-dirs)")
-    ids = [q.get("id") for q in queries] if queries else []
-    return collect_rerun_groups(dirs, ids)
+    return collect_rerun_groups(dirs, queries or [])
 
 
-def load_paired_metrics(run_dir: Path) -> list[dict]:
+def load_paired_metrics(run_dir: Path, *,
+                        require_crosscheck: str | None = None,
+                        expected: list[dict] | None = None) -> list[dict]:
     """Load the OTHER arm's per-query metric list from its scorecard for a
     same-query A4 comparison (re-spec A4). Returns the metric dicts of that
     run's ok, scored queries, with ``query_id`` injected from the scorecard
-    entry when the scorer predates the query_id field so pairing still works."""
+    entry when the scorer predates the query_id field so pairing still works.
+
+    Validation (Codex): the paired arm must be the OPPOSITE cross-check arm
+    (``require_crosscheck``), and each paired query's recorded text/class
+    must match the main arm's expected query — pairing unrelated missions or
+    two enabled arms must never produce a gate."""
     sc = Path(run_dir) / "scorecard.json"
     if not sc.exists():
         raise ValueError(f"paired-arm run has no scorecard.json: {run_dir}")
     data = load_json(sc)
+    prov = data.get("provenance", {})
+    if require_crosscheck is not None and \
+            prov.get("crosscheck") not in (None, require_crosscheck):
+        raise ValueError(f"paired-arm run crosscheck is "
+                         f"{prov.get('crosscheck')!r}, expected "
+                         f"{require_crosscheck!r} (it must be the OTHER arm)")
+    expected_by_id = {q.get("id"): q for q in (expected or [])
+                      if q.get("id")}
     out: list[dict] = []
     for e in data.get("queries", []):
         if not isinstance(e, dict) or not e.get("ok") or not e.get("metrics"):
             continue
+        qid = e.get("id")
+        exp = expected_by_id.get(qid) if expected_by_id else None
+        if expected_by_id and exp is None:
+            raise ValueError(f"paired-arm query {qid!r} is not in the main "
+                             f"arm's query set")
+        if exp is not None:
+            if e.get("query") and exp.get("query") \
+                    and e["query"] != exp["query"]:
+                raise ValueError(f"paired-arm query {qid!r} text drifted "
+                                 f"from the main arm")
+            if e.get("class") and exp.get("class") \
+                    and e["class"] != exp["class"]:
+                raise ValueError(f"paired-arm query {qid!r} class drifted "
+                                 f"from the main arm")
         m = dict(e["metrics"])
-        m.setdefault("query_id", e.get("id"))
+        m.setdefault("query_id", qid)
         out.append(m)
     return out
 
 
-def collect_rerun_groups(run_dirs: list[Path], query_ids: list[str]) \
-        -> list[list[dict]]:
-    """Collect determinism rerun ledgers (re-spec A6): for every query id that
+def collect_rerun_groups(run_dirs: list[Path],
+                         queries: list[dict]) -> list[list[dict]]:
+    """Collect determinism rerun ledgers (re-spec A6): for every query that
     has a ledger in >= 3 of ``run_dirs``, group those ledgers. Each returned
     group is one query's >= 3 same-query reruns, ready for ``gates(
     rerun_groups=...)``. Fewer than 3 usable reruns -> the query contributes
-    nothing (the gate stays n/a for it)."""
+    nothing (the gate stays n/a for it).
+
+    Validation (Codex): a rerun ledger whose embedded ``query`` text differs
+    from the expected query is NOT a rerun of that question — it is skipped
+    like a corrupt ledger, so A6 can never pass on mismatched missions."""
     groups: list[list[dict]] = []
-    for qid in query_ids:
+    for q in queries:
+        qid = q.get("id")
+        qtext = q.get("query")
+        if not qid:
+            continue
         ledgers = []
         for d in run_dirs:
             lp = Path(d) / qid / "ledger.json"
-            if lp.exists():
-                try:
-                    ledgers.append(load_json(lp))
-                except Exception:  # noqa: BLE001 - one corrupt rerun must not
-                    continue       # drop the whole determinism arm
+            if not lp.exists():
+                continue
+            try:
+                ledger = load_json(lp)
+            except Exception:  # noqa: BLE001 - one corrupt rerun must not
+                continue       # drop the whole determinism arm
+            if qtext and ledger.get("query") and ledger["query"] != qtext:
+                continue      # different mission, not a rerun of this query
+            ledgers.append(ledger)
         if len(ledgers) >= 3:
             groups.append(ledgers)
     return groups
@@ -495,12 +539,21 @@ def main() -> int:
             if err:
                 p.error(f"relevance rejected: {err}")
             relevance_list = judgements
+        # Rescore arm is crosscheck 'on' unless the original run was a nocc
+        # arm (then a valid paired arm must itself be crosscheck-off's
+        # opposite: i.e. the paired arm's crosscheck must differ).
+        main_cc = prov.get("crosscheck") != "off"
+        paired_metrics = _load_optional_paired(
+            args.paired_arm, parser=p,
+            require_crosscheck="off" if main_cc else "on",
+            expected=resolved)
+        rerun_groups = _load_optional_reruns(args.rerun_dirs, parser=p,
+                                             queries=resolved)
         return _rescore_main(run_dir, resolved, gold_dir, judge_enabled,
                              relevance_list, args.no_crosscheck or nocc_orig,
                              args.cap_usd,
-                             paired_metrics=_load_optional_paired(args.paired_arm, p),
-                             rerun_groups=_load_optional_reruns(
-                                 args.rerun_dirs, p, resolved))
+                             paired_metrics=paired_metrics,
+                             rerun_groups=rerun_groups)
 
     # execute path: --relevance is a plain 0/1 list (no sample to bind)
     relevance = None
@@ -515,6 +568,16 @@ def main() -> int:
     out_root = Path(args.out) / run_id
     out_root.mkdir(parents=True, exist_ok=True)
     extra = ["--no-crosscheck"] if args.no_crosscheck else []
+
+    # Resolve comparison inputs BEFORE any paid mission runs (Codex): a
+    # malformed paired scorecard or rerun dir must fail before spending the
+    # budget, never after the loop has consumed it.
+    paired_metrics = _load_optional_paired(
+        args.paired_arm, parser=p,
+        require_crosscheck="off" if not args.no_crosscheck else "on",
+        expected=queries)
+    rerun_groups = _load_optional_reruns(args.rerun_dirs, parser=p,
+                                         queries=queries)
 
     print(f"[bench] {len(queries)} query(s), cap ${args.cap_usd:.2f}, "
           f"crosscheck={'off' if args.no_crosscheck else 'on'}, "
@@ -601,9 +664,8 @@ def main() -> int:
     completed = [e for e in per_query if e.get("ok") and e.get("metrics")]
     agg = gates([e["metrics"] for e in completed],
                 relevance_judgements=relevance,
-                q_metrics_nocc=_load_optional_paired(args.paired_arm, p),
-                rerun_groups=_load_optional_reruns(args.rerun_dirs, p,
-                                                   queries))
+                q_metrics_nocc=paired_metrics,
+                rerun_groups=rerun_groups)
     n_failed = sum(1 for e in per_query if not e.get("ok")
                    and not e.get("skipped_cap"))
     n_skipped = sum(1 for e in per_query if e.get("skipped_cap"))
