@@ -51,10 +51,11 @@ def _jaccard(a: set, b: set) -> float:
 
 def _adopt_evidence(target: Claim, donor: Claim) -> None:
     """Merge the donor claim's evidence onto the target, keeping only the
-    first entry per source locator. Called when a corroborating cross claim
-    is consumed (matched to an existing primary instead of appended) so the
-    source that justified a promotion to ``high`` stays on the claim in the
-    report/ledger rather than vanishing with the dropped cross claim."""
+    first entry per source locator. Call only with VERIFIED-supported donors
+    (the semantic pass): a consumed corroborating claim's evidence must stay
+    on the claim it promoted rather than vanish with the dropped claim — but
+    unverified lexical matches must never feed evidence into a verified
+    primary (Codex P1)."""
     have = {e.source.locator() for e in target.evidence}
     for e in donor.evidence:
         loc = e.source.locator()
@@ -124,10 +125,12 @@ def run_crosscheck(
     # as new candidates.
     eligible_cross = [c for c in candidates
                       if c.verdict is Verdict.SUPPORTED]
+    # a primary the lexical pass already crosschecked (same-source match) is
+    # still eligible: a later verified paraphrase from a genuinely new source
+    # should promote it, not be appended as a duplicate (Codex P2)
     eligible_primary = [c for c in original_primary
                         if c.verdict is Verdict.SUPPORTED
-                        and c.confidence == "medium"
-                        and not c.crosschecked]
+                        and c.confidence == "medium"]
     sem_flags, sem_promos, sem_pairs = corroborate_from_semantic(
         llm, eligible_primary, eligible_cross)
     consumed = {id(xc) for _pc, xc in sem_pairs}
@@ -141,8 +144,13 @@ def run_crosscheck(
     summary["appended"] = appended
     summary["corroborated_semantic"] = sem_flags
     summary["promoted_semantic"] = sem_promos
-    if sem_flags:
-        summary["corroborated"] = (summary.get("corroborated") or 0) + sem_flags
+    # recount distinct claims, not passes: a primary the lexical pass
+    # crosschecked may also be promoted semantically, so adding the two
+    # passes' counts would double-count. crosschecked is the complete signal
+    # here — reconcile sets it before its own promotion check, and 'high' is
+    # only ever assigned inside cross-check promotion, never by verify.
+    summary["corroborated"] = len(
+        {c.id for c in original_primary if c.crosschecked})
     summary["cross_gaps"] = gaps
     summary["confidence_counts"] = dict(Counter(c.confidence for c in primary))
     # Appended candidates carry ids from the cross-pass extraction, which
@@ -187,9 +195,11 @@ def reconcile(
                 # cross {A} is subset agreement, not independent evidence
                 if pc_locs and (xc_locs - pc_locs):
                     pc.confidence = "high"
-            # matched cross claims are consumed (never appended), so their
-            # evidence must survive on the claim that now rests on it
-            _adopt_evidence(pc, xc)
+            # NOTE: matched cross claims reach reconcile straight from
+            # extraction — UNVERIFIED — so their evidence is never merged
+            # into the verified primary here (Codex P1: adopt evidence only
+            # from verified-supported donors; that is the semantic pass's
+            # job, where donors passed verify_claim first).
         else:
             candidates.append(xc)
 

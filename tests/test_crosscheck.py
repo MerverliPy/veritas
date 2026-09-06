@@ -77,10 +77,10 @@ def test_reconcile_subset_sources_do_not_promote():
     assert pc.crosschecked is True
 
 
-def test_reconcile_promotion_keeps_corroborating_source():
-    """A matched cross claim is consumed (never appended), so a promotion to
-    high must keep the corroborating claim's new source on the primary
-    (report/ledger traceability)."""
+def test_reconcile_promotes_without_adopting_unverified_evidence():
+    """Deterministic matches reach reconcile straight from extraction —
+    unverified — so their evidence is NOT merged into the verified primary;
+    only the semantic pass adopts (its donors passed verify_claim)."""
     pc = claim("Veritas ships a nightly JSON batch process", "https://a.example/x")
     xc = claim("Veritas ships a nightly JSON batch process regularly",
                "https://b.example/y", cid="x1")
@@ -88,8 +88,7 @@ def test_reconcile_promotion_keeps_corroborating_source():
     assert result["corroborated"] == 1
     assert pc.confidence == "high"
     assert result["candidates"] == []
-    assert {e.source.locator() for e in pc.evidence} == {
-        "https://a.example/x", "https://b.example/y"}
+    assert {e.source.locator() for e in pc.evidence} == {"https://a.example/x"}
 
 
 def test_unmatched_cross_claim_becomes_candidate_not_auto_claim():
@@ -243,6 +242,31 @@ def test_semantic_corroborate_cross_index_is_single_use_only():
     # [1,2] dropped (xc1 may not match two primaries); [2,1] allowed
     assert semantic_corroborate(llm, [pc1, pc2], [xc1, xc2]) == [
         (pc1, xc1), (pc1, xc2)]
+
+
+def test_crosschecked_primary_still_promotable_by_semantic_new_source():
+    """A primary first crosschecked by a SAME-source lexical match stays
+    eligible for the semantic pass (Codex P2): a verified paraphrase from a
+    genuinely new source must promote it, not be appended as a duplicate."""
+    pc = claim("The USSR orbited Sputnik in October 1957", "https://wiki.example/s")
+    dup = claim("The USSR orbited Sputnik in October 1957", "https://wiki.example/s",
+                cid="x1")  # same source -> crosschecked, stays medium
+    result = reconcile([pc], [dup])
+    assert result["corroborated"] == 1
+    assert pc.crosschecked is True
+    assert pc.confidence == "medium"
+    # a verified paraphrase from a genuinely new source (survives reconcile
+    # as a candidate, then passes verify_claim) must still promote the claim
+    xc = claim("Sputnik 1 entered orbit in October 1957", "https://esa.example/y",
+               cid="x2")
+    llm = FakeLLM({CORROBORATOR_SYSTEM: json.dumps(
+        {"same_fact_pairs": [[1, 1]]})})
+    flags, promos, pairs = corroborate_from_semantic(llm, [pc], [xc])
+    assert (flags, promos) == (1, 1)
+    assert pc.confidence == "high"
+    assert len(pairs) == 1
+    assert {e.source.locator() for e in pc.evidence} == {
+        "https://wiki.example/s", "https://esa.example/y"}
 
 
 # -------------------------------------------------------- detect_contradictions
