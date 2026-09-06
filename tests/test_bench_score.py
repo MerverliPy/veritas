@@ -850,6 +850,38 @@ def test_execute_reuse_drops_stale_rescore_artifact(tmp_path, monkeypatch):
     assert not stale.exists()
 
 
+def test_rescore_rejects_stale_ledger_from_failed_source(tmp_path, monkeypatch):
+    """Codex P1: rescoring a run whose source scorecard marks a query failed
+    (ok:false) must not score the stale ledger.json left behind — a
+    fabricated rescored success would later be treated as authoritative by a
+    paired-arm load."""
+    import sys
+    from bench.run_benchmark import REPO, main as _main  # noqa: F401
+    spec = json.loads((REPO / "bench" / "queries.json").read_text())
+    f1 = next(q for q in spec["queries"] if q["id"] == "f1-wannacry")
+    run_dir = tmp_path / "run"
+    (run_dir / "f1-wannacry").mkdir(parents=True)
+    # stale ledger from an EARLIER successful mission; the latest mission
+    # failed and scorecard.json records ok:false
+    (run_dir / "f1-wannacry" / "ledger.json").write_text(json.dumps({
+        "query": f1["query"], "claims": []}))
+    (run_dir / "scorecard.json").write_text(json.dumps({
+        "provenance": {"crosscheck": "on", "gold_judge": "off"},
+        "queries": [{"id": "f1-wannacry", "ok": False,
+                      "query": f1["query"], "class": f1["class"],
+                      "metrics": {"class": "F"}}]}))
+    monkeypatch.setattr(sys, "argv", ["run_benchmark.py",
+                                      "--rescore", str(run_dir),
+                                      "--ids", "f1-wannacry",
+                                      "--no-judge"])
+    _main()
+    out = json.loads((run_dir / "scorecard-rescore.json").read_text())
+    q = out["queries"][0]
+    assert q["ok"] is False
+    assert "stale ledger" in q["error"]
+    assert q["metrics"] == {}
+
+
 def test_rescore_rejects_missing_crosscheck_provenance(tmp_path, monkeypatch):
     """Codex P1: rescoring a source scorecard without provenance.crosscheck
     must abort — defaulting a missing arm to 'on' could rescore an off-arm

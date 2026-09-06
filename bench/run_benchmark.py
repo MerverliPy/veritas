@@ -454,7 +454,8 @@ def _rescore_main(run_dir: Path, queries: list[dict], gold_dir: Path,
                   no_crosscheck: bool, cap_usd: float,
                   crosscheck: str = "on",
                   paired_metrics: list[dict] | None = None,
-                  rerun_groups: list[list[dict]] | None = None) -> int:
+                  rerun_groups: list[list[dict]] | None = None,
+                  source_ok: dict[str, bool] | None = None) -> int:
     """Score an existing run dir without new missions. Relevance judgements
     are bound to this run's sample by the caller; the judge spend respects
     the cap. ``paired_metrics`` (the cross-check-off arm's metrics) and
@@ -462,7 +463,11 @@ def _rescore_main(run_dir: Path, queries: list[dict], gold_dir: Path,
     gates when the owner supplies them. ``crosscheck`` is the ORIGINAL
     run's arm (from its scorecard provenance), recorded in the rescore
     artifact so a rescored run is self-describing when later used as a
-    paired arm; gold/scorer revisions are bound the same way."""
+    paired arm; gold/scorer revisions are bound the same way. ``source_ok``
+    is the source scorecard's per-query success map: a query whose latest
+    mission FAILED leaves a stale ledger.json behind, and scoring it would
+    fabricate a successful rescore entry that a later paired-arm load would
+    treat as authoritative (Codex P1) — reject it instead."""
     per_query = []
     capped = False
     total_usd = 0.0
@@ -483,6 +488,17 @@ def _rescore_main(run_dir: Path, queries: list[dict], gold_dir: Path,
             per_query.append({"id": q["id"], "class": q.get("class"),
                               "query": q.get("query", ""), "ok": False,
                               "error": "no ledger in run dir", "metrics": {}})
+            continue
+        if source_ok is not None and source_ok.get(q["id"]) is False:
+            # The source mission FAILED for this query: the ledger.json left
+            # behind is stale (from an earlier successful run). Scoring it
+            # would fabricate a rescored success that a later paired-arm
+            # load treats as authoritative (Codex P1).
+            per_query.append({"id": q["id"], "class": q.get("class"),
+                              "query": q.get("query", ""), "ok": False,
+                              "error": "source mission failed (scorecard "
+                                        "ok:false); stale ledger not rescored",
+                              "metrics": {}})
             continue
         entry = _assess(q, q.get("query") or "", qout, gold_dir, judge_enabled,
                         qout / "llm-rescore.log")
@@ -751,12 +767,16 @@ def main() -> int:
             p.error("--rerun-dirs produced no usable determinism group: no "
                     "query has >=3 readable same-query rerun ledgers with a "
                     "confidence distribution or plan in the given dirs")
+        # A failed source mission leaves a stale ledger.json behind; the
+        # rescore must reject it, not fabricate a success from it (Codex P1).
+        source_ok = {eid: bool(rec.get("ok")) for eid, rec in recorded.items()}
         return _rescore_main(run_dir, resolved, gold_dir, judge_enabled,
                              relevance_list, args.no_crosscheck or nocc_orig,
                              args.cap_usd,
                              crosscheck="off" if nocc_orig else "on",
                              paired_metrics=paired_metrics,
-                             rerun_groups=rerun_groups)
+                             rerun_groups=rerun_groups,
+                             source_ok=source_ok)
 
     # execute path: --relevance is a plain 0/1 list (no sample to bind)
     relevance = None
