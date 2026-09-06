@@ -98,23 +98,47 @@ _NEGATION = re.compile(
     r"\b(?:not|no|never|without|nor|nothing|nobody|nowhere|neither|"
     r"hardly|barely|unlikely)\b")
 
-# 'No.'/'no' used as a patent/case-number abbreviation ('No. 763,772') is
-# not a negation: it precedes a digit, optionally via a period.
-_NO_ABBREV_FOLLOW = re.compile(r"^\s*(?:\.\s*)?\d")
+# 'No.' used as a patent/case-number abbreviation ('No. 763,772') is not a
+# negation. Require the period so a genuine quantified negation ('no 150
+# countries') still counts: an abbreviation always prints 'No. <number>',
+# while 'no <count> <noun>' carries no period.
+_NO_ABBREV_FOLLOW = re.compile(r"^\.\s*\d")
+
+# Status predicates whose antonyms are truth-critical: a claim that swaps
+# one for the other states the opposite fact and must never match.
+_ANTONYM_PAIRS = (("granted", "rejected"), ("valid", "invalid"))
+
+# Status synonyms normalized onto the antonym-pair canonical form so a
+# 'granted/issued/awarded' claim is never equidistant from a correct
+# 'granted' entry and its mirror 'rejected' guard (which would tie-break
+# toward the incorrect label).
+_STATUS_SYNONYMS = {"issued": "granted", "awarded": "granted"}
 
 
 def _negation_count(text: str) -> int:
     """Number of negation markers. Double negation ('did not spread without
     requiring...') must not collapse to the same polarity as a single
-    'without'. A leading 'no' that is a number abbreviation ('patent
-    No. 763,772') is not counted — otherwise otherwise-verbatim claims that
-    spell the patent number conventionally are polarity-rejected."""
+    'without'. A 'no' that is a patent/case-number abbreviation ('patent
+    No. 763,772' — period followed by a digit) is not counted; a genuine
+    quantified negation ('no 150 countries') still is."""
     count = 0
     for m in _NEGATION.finditer(text.lower()):
         if m.group(0) == "no" and _NO_ABBREV_FOLLOW.match(text[m.end():]):
-            continue  # number abbreviation, not a negation
+            continue  # 'No. <number>' abbreviation, not a negation
         count += 1
     return count
+
+
+def _antonym_conflict(statement: str, gold: str) -> bool:
+    """True when the two statements swap a status predicate for its antonym
+    ('granted in 1900' vs 'rejected in 1900', 'claims ... valid' vs
+    'claims ... invalid'). Word-level similarity cannot see the opposition,
+    so an explicit pair check stops either direction from matching."""
+    sa, ga = _sig_tokens(statement), _sig_tokens(gold)
+    for a, b in _ANTONYM_PAIRS:
+        if (a in sa and b in ga) or (b in sa and a in ga):
+            return True
+    return False
 
 
 def _quantities(text: str) -> set[str]:
@@ -172,7 +196,8 @@ def _quantity_conflict(statement: str, gold: str) -> bool:
 
 
 def _sig_tokens(text: str) -> set[str]:
-    return set(re.findall(r"[a-z0-9_]{4,}", text.lower()))
+    return {_STATUS_SYNONYMS.get(t, t)
+            for t in re.findall(r"[a-z0-9_]{4,}", text.lower())}
 
 
 def _jaccard(a: str, b: str) -> float:
@@ -201,6 +226,8 @@ def best_gold_match(statement: str, expected: list[dict]) -> dict | None:
             continue  # disjoint quantity sets: explicit disagreement
         if _quantity_conflict(statement, st):
             continue  # same anchored quantity, different value
+        if _antonym_conflict(statement, st):
+            continue  # status predicate swapped for its antonym
         if sneg != eneg:
             continue  # different negation scope/count is a different claim
         sim = _jaccard(statement, st)

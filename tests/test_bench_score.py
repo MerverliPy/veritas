@@ -1188,6 +1188,23 @@ def test_d2_radio_priority_claims_never_certified():
     assert gold_verdict("Marconi and Tesla won the 1909 Nobel Prize in "
                         "Physics for wireless telegraphy.",
                         expected) == "incorrect"
+    assert gold_verdict("Marconi and Braun shared the 1909 Nobel Prize in "
+                        "Physics.", expected) == "correct"
+    # grant synonyms must not tie-break into the rejection guard (round 9)
+    assert gold_verdict("Tesla's patent 645,576 for wireless transmission "
+                        "was filed in 1897 and issued in 1900.",
+                        expected) == "correct"
+    assert gold_verdict("Tesla's patent 645,576 for wireless transmission "
+                        "was filed in 1897 and awarded in 1900.",
+                        expected) == "correct"
+    # concise invalid-holding phrasing credits; 'valid despite' never does
+    assert gold_verdict("In 1943 the Supreme Court held Marconi's claims 10 "
+                        "and 11 invalid due to Stone's earlier patent.",
+                        expected) == "correct"
+    assert gold_verdict("In 1943 the United States Supreme Court held "
+                        "claims 10 and 11 of Marconi's patent number 763,772 "
+                        "valid despite John Stone Stone's earlier patent.",
+                        expected) == "incorrect"
     # 'No.' patent abbreviation is not a negation (round-8 P2 matcher fix)
     assert gold_verdict("Tesla's patent No. 645,576 for wireless "
                         "transmission was filed in 1897 and granted in "
@@ -1388,3 +1405,28 @@ def test_negation_count_treats_patent_number_abbreviation_as_non_negation():
     assert _negation_count("no evidence was found") == 1
     assert _negation_count("did not spread without user interaction") == 2
     assert _negation_count("no copy of the issue survived") == 1
+    # a quantified negation is not an abbreviation: no period follows 'no'
+    assert _negation_count("affected no 150 countries in May 2017") == 1
+
+
+def test_status_antonym_and_synonym_matching():
+    """granted/rejected and valid/invalid are truth-critical opposites the
+    word-level matcher cannot see; grant synonyms normalize onto 'granted'
+    so a true claim never tie-breaks into a mirror rejection guard."""
+    from bench.score import _antonym_conflict, gold_verdict
+    assert _antonym_conflict("the patent was granted in 1900",
+                             "the patent was rejected in 1900")
+    assert _antonym_conflict("claims 10 and 11 are invalid",
+                             "claims 10 and 11 are valid")
+    assert not _antonym_conflict("the patent was granted in 1900",
+                                 "the patent was granted in 1901")
+    gold = [{"statement": "Tesla's patent was granted in 1900.",
+             "gold_label": "correct"},
+            {"statement": "Tesla's patent was rejected in 1900.",
+             "gold_label": "incorrect"}]
+    assert gold_verdict("Tesla's patent was issued in 1900.",
+                        gold) == "correct"
+    assert gold_verdict("Tesla's patent was awarded in 1900.",
+                        gold) == "correct"
+    assert gold_verdict("Tesla's patent was rejected in 1900.",
+                        gold) == "incorrect"
