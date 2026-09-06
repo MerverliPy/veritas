@@ -1462,9 +1462,10 @@ def test_status_antonym_and_synonym_matching():
                              "claim 16 was valid and infringed")
     assert _antonym_conflict("the Court voided claim 16",
                              "claim 16 was valid and infringed")
-    # unenforceable is NOT the same disposition as invalid (round 15)
-    assert not _antonym_conflict("claims 10 and 11 unenforceable",
-                                 "claims 10 and 11 invalid")
+    # unenforceable is a distinct disposition from invalid: it must never
+    # match an 'invalid' anchor for credit, but it does conflict with it
+    assert _antonym_conflict("claims 10 and 11 unenforceable",
+                             "claims 10 and 11 invalid")
     assert _antonym_conflict("claims 10 and 11 unenforceable",
                              "claims 10 and 11 are valid")
     assert not _antonym_conflict("the patent was granted in 1900",
