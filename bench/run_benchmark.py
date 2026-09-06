@@ -770,6 +770,14 @@ def main() -> int:
     run_id = args.run_id or f"{arm}-{datetime.datetime.now():%Y%m%d-%H%M%S}"
     out_root = Path(args.out) / run_id
     out_root.mkdir(parents=True, exist_ok=True)
+    # Reusing a named run dir must not inherit a stale rescore artifact: a
+    # fresh mission overwrites scorecard.json + ledgers below, but a previous
+    # invocation's scorecard-rescore.json would still be preferred by the
+    # paired-arm loader and A4 could report metrics from the WRONG (older)
+    # run under a matching-looking revision (Codex P1). Drop it on reuse.
+    stale_rescore = out_root / "scorecard-rescore.json"
+    if stale_rescore.exists():
+        stale_rescore.unlink()
     extra = ["--no-crosscheck"] if args.no_crosscheck else []
 
     # Resolve comparison inputs BEFORE any paid mission runs (Codex): a

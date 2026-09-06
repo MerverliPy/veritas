@@ -825,6 +825,31 @@ def test_a4_off_arm_main_run_is_rejected(tmp_path):
                             require_gold_judge_on=True, expected=expected)
 
 
+def test_execute_reuse_drops_stale_rescore_artifact(tmp_path, monkeypatch):
+    """Codex P1: reusing a named run dir must drop a prior
+    scorecard-rescore.json before fresh missions overwrite scorecard.json —
+    the paired-arm loader prefers the rescore artifact, so a stale one would
+    feed A4 metrics from the wrong (older) run."""
+    import sys
+    from bench.run_benchmark import main as _main  # noqa: F401 - CLI guarded
+    run_dir = tmp_path / "full-1"
+    run_dir.mkdir()
+    stale = run_dir / "scorecard-rescore.json"
+    stale.write_text(json.dumps({"provenance": {"crosscheck": "on"}}))
+    assert stale.exists()
+    # Execute path: fresh --no-crosscheck mission with a paired arm is
+    # rejected AFTER the run dir is prepared, so the stale rescore must
+    # already be gone when that error fires (and gone before any new
+    # scorecard.json could be written).
+    monkeypatch.setattr(sys, "argv", [
+        "run_benchmark.py", "--run-id", "full-1",
+        "--out", str(tmp_path),
+        "--no-crosscheck", "--paired-arm", str(tmp_path / "nocc")])
+    with pytest.raises(SystemExit):
+        _main()
+    assert not stale.exists()
+
+
 def test_rescore_rejects_missing_crosscheck_provenance(tmp_path, monkeypatch):
     """Codex P1: rescoring a source scorecard without provenance.crosscheck
     must abort — defaulting a missing arm to 'on' could rescore an off-arm
