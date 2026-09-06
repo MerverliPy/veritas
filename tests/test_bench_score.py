@@ -22,10 +22,10 @@ from bench.score import (
 
 def claim(statement: str, *, verdict: str = "supported",
           confidence: str = "medium", conflicts: list | None = None,
-          crosschecked: bool = False) -> dict:
+          crosschecked: bool = False, subquestion: str = "sq") -> dict:
     return {"id": f"c{hash(statement) & 0xffff}",
             "statement": statement,
-            "subquestion": "sq",
+            "subquestion": subquestion,
             "evidence": [],
             "verdict": verdict,
             "confidence": confidence,
@@ -34,16 +34,17 @@ def claim(statement: str, *, verdict: str = "supported",
             "note": ""}
 
 
-def ledger(claims: list[dict], *, conflicts: list | None = None) -> dict:
+def ledger(claims: list[dict], *, conflicts: list | None = None,
+           gaps: list | None = None) -> dict:
     return {"query": "q", "created_at": "2026-01-01T00:00:00Z",
             "surfaces": ["web"], "confidence_counts": {},
-            "claims": claims, "gaps": [],
+            "claims": claims, "gaps": gaps or [],
             "crosscheck": {},
             "conflicts": conflicts or []}
 
 
-def gold(cls: str, expected: list[dict]) -> dict:
-    return {"query_id": "q", "class": cls,
+def gold(cls: str, expected: list[dict], *, query_id: str = "q") -> dict:
+    return {"query_id": query_id, "class": cls,
             "source_landscape": "test", "expected_claims": expected}
 
 
@@ -149,16 +150,17 @@ def test_structure_only_without_gold():
 # --------------------------------------------------------------------------
 
 def _all_pass_query_metrics():
-    """One F, one U, one D ledger whose combined metrics satisfy A1–A4."""
+    """One F, one U, one D ledger (query ids f1/u1/d1) whose combined metrics
+    satisfy A1–A4 under the re-spec gates (A5/A6 take their own inputs)."""
     f_expected = ([exp(f"Solid fact {i} is well documented.") for i in range(11)]
                   + [exp(f"False claim {i} is not true.", "incorrect")
                      for i in range(4)]
                   + [exp("A twelfth correct fact no claim covers.")])
     f_claims = []
-    # supported-correct: 3 high, 6 medium, 2 low
+    # supported-correct: 3 high (cross-checked), 6 medium, 2 low
     for i in range(3):
         f_claims.append(claim(f"Solid fact {i} is well documented.",
-                              confidence="high"))
+                              confidence="high", crosschecked=True))
     for i in range(3, 9):
         f_claims.append(claim(f"Solid fact {i} is well documented.",
                               confidence="medium"))
@@ -172,18 +174,21 @@ def _all_pass_query_metrics():
     for i in range(2, 4):
         f_claims.append(claim(f"False claim {i} is not true.",
                               verdict="partial", confidence="low"))
-    f = compute_query_metrics(ledger(f_claims), gold("F", f_expected))
+    f = compute_query_metrics(ledger(f_claims),
+                              gold("F", f_expected, query_id="f1"))
     u = compute_query_metrics(
         ledger([claim("Scant trace of an answer.", verdict="unsupported",
                       confidence="unsupported"),
-                claim("Weak hint only.", verdict="partial", confidence="low")]),
-        gold("U", []))
+                claim("Weak hint only.", verdict="partial",
+                      confidence="low")]),
+        gold("U", [], query_id="u1"))
     d = compute_query_metrics(
         ledger([claim("Side A is documented.", verdict="contradicted",
                       confidence="low", conflicts=["Side B is documented."])],
                conflicts=[{"a": "Side A", "b": "Side B"}]),
         gold("D", [exp("Side A is documented.", "contested"),
-                   exp("Side B is documented.", "contested")]))
+                   exp("Side B is documented.", "contested")],
+             query_id="d1"))
     return [f, u, d]
 
 
@@ -203,40 +208,55 @@ def test_recall_excludes_rejected_claims():
     assert compute_query_metrics(partial, g)["recall_gold"] == 1.0
 
 
-def test_gates_all_pass():
-    qm = _all_pass_query_metrics()
-    # paired arm: same precision, zero high claims -> cross-check benefit
+def _nocc_f_metric():
+    """Paired-arm F metric for the SAME query (f1) with zero high claims
+    (no cross-check) — the A4 benefit is the with-arm high_share."""
     f_nocc_claims = [claim(f"Solid fact {i} is well documented.",
                            confidence="medium") for i in range(11)]
-    f_nocc = compute_query_metrics(ledger(f_nocc_claims),
-                                   gold("F", [exp(f"Solid fact {i} "
-                                                   "is well documented.")
-                                               for i in range(11)]))
-    qm_nocc = [f_nocc, qm[1], qm[2]]
+    return compute_query_metrics(
+        ledger(f_nocc_claims),
+        gold("F", [exp(f"Solid fact {i} is well documented.")
+                    for i in range(11)], query_id="f1"))
+
+
+def _stable_reruns(n: int = 3) -> list[list[dict]]:
+    """n reruns of the SAME query with identical confidence distributions and
+    identical sub-question sets — a perfectly deterministic arm."""
+    def _one():
+        return ledger([claim("First stable claim statement here.",
+                             verdict="supported", confidence="medium"),
+                       claim("Second stable claim statement here.",
+                             verdict="supported", confidence="high",
+                             crosschecked=True),
+                       claim("Third weak trace here.", verdict="unsupported",
+                             confidence="unsupported")])
+    return [[_one() for _ in range(n)]]
+
+
+def test_gates_all_pass():
+    qm = _all_pass_query_metrics()
+    # paired arm: same query ids (f1/u1/d1), no high claims -> benefit visible
+    qm_nocc = [_nocc_f_metric(), qm[1], qm[2]]
     g = gates(qm, q_metrics_nocc=qm_nocc,
               relevance_judgements=[1, 1, 1, 0],
-              flip_pairs=[(ledger([claim("First stable claim statement here.",
-                                          verdict="supported"),
-                                   claim("Second stable claim statement here.",
-                                          verdict="partial")]),
-                           ledger([claim("First stable claim statement here.",
-                                          verdict="supported"),
-                                   claim("Second stable claim statement here.",
-                                          verdict="partial")]))])
+              rerun_groups=_stable_reruns())
     assert g["A1_precision_fabrication"]["ok"] is True   # precision 1.0, fab 0
-    assert g["A2_calibration"]["ok"] is True             # 1.0 / 0.75 / 0.5
-    assert g["A3_honest_failure_U"]["ok"] is True        # share 1.0
+    assert g["A2_calibration"]["ok"] is True             # medium 0.75, corr ok
+    assert g["A3_honest_failure_U"]["ok"] is True        # sub-q share 1.0
     assert g["A4_crosscheck_benefit"]["ok"] is True      # fires + delta
     assert g["A5_relevance"]["ok"] is True               # median 1.0
-    assert g["A6_determinism"]["ok"] is True             # flip rate 0
+    assert g["A6_determinism"]["ok"] is True             # dist L1 0 <= 0.30
     assert g["A1_precision_fabrication"]["value"]["precision_supported"] == 1.0
     rel = g["A2_calibration"]["value"]["reliability"]
     assert rel["high"] == 1.0 and abs(rel["medium"] - 0.75) < 1e-9 \
         and rel["low"] == 0.5
     v4 = g["A4_crosscheck_benefit"]["value"]
-    assert v4["all_D_fired"] is True
+    assert v4["n_paired"] == 3
+    assert v4["D_fired_with"] == 1
     assert v4["high_share_with"] > v4["high_share_without"]
-    assert v4["precision_with"] >= v4["precision_without"]
+    assert v4["precision_with"] >= v4["precision_without"] - 0.05
+    assert g["A6_determinism"]["value"]["median_pairwise_l1"] == 0.0
+    assert g["A6_determinism"]["value"]["median_pairwise_subq_jaccard"] == 1.0
 
 
 def test_gates_detect_failures_and_na():
@@ -254,13 +274,37 @@ def test_gates_detect_failures_and_na():
     # A5 fail: poor relevance judgements
     g2 = gates(_all_pass_query_metrics(), relevance_judgements=[0, 0])
     assert g2["A5_relevance"]["ok"] is False
-    # A6 fail: verdict reversal across reruns
-    g3 = gates(_all_pass_query_metrics(),
-               flip_pairs=[(ledger([claim("Kill-switch stopped it.",
+    # A6 fail: divergent confidence distributions across reruns
+    divergent = [[
+        ledger([claim("Same topic claim.", confidence="low")]),
+        ledger([claim("Same topic claim.", confidence="medium")]),
+        ledger([claim("Same topic claim.", confidence="high")]),
+    ]]
+    g3 = gates(_all_pass_query_metrics(), rerun_groups=divergent)
+    assert g3["A6_determinism"]["ok"] is False   # dist L1 > 0.30
+    # A6 statement-level flip_rate is informational: a reversal with NO
+    # rerun groups is not-applicable, not a FAIL (flip is reported, not gated)
+    g3b = gates(_all_pass_query_metrics(),
+                flip_pairs=[(ledger([claim("Kill-switch stopped it.",
                                           verdict="supported")]),
-                            ledger([claim("Kill-switch stopped it.",
+                             ledger([claim("Kill-switch stopped it.",
                                           verdict="contradicted")]))])
-    assert g3["A6_determinism"]["ok"] is False
+    assert g3b["A6_determinism"]["ok"] is None
+    assert g3b["A6_determinism"]["value"]["flip_rate"] == 1.0
+    # A2 fail: corroboration below the floor (cross-check never fired)
+    f_nocorr = compute_query_metrics(
+        ledger([claim("Supported fact zero is well documented.",
+                      confidence="medium", crosschecked=False),
+                claim("Supported fact one is well documented.",
+                      confidence="medium", crosschecked=False)]),
+        gold("F", [exp("Supported fact zero is well documented."),
+                   exp("Supported fact one is well documented.")]))
+    g5 = gates([f_nocorr,
+                compute_query_metrics(
+                    ledger([claim("Nothing found.", verdict="unsupported",
+                                  confidence="unsupported")]),
+                    gold("U", []))])
+    assert g5["A2_calibration"]["ok"] is False       # corr 0.0 < 0.05
     # Not-applicable: no data for a gate -> None, never FAIL
     g4 = gates([_all_pass_query_metrics()[0]])
     assert g4["A3_honest_failure_U"]["ok"] is None
@@ -269,6 +313,138 @@ def test_gates_detect_failures_and_na():
     # A4 without the paired arm is n/a, never PASS on a mainline fire alone
     assert gates(_all_pass_query_metrics())["A4_crosscheck_benefit"]["ok"] \
         is None
+    # A4 with <2 paired same-query pairs is n/a (evaluated at full-run scale)
+    only_one = gates([_all_pass_query_metrics()[0]],
+                     q_metrics_nocc=[_nocc_f_metric()])
+    assert only_one["A4_crosscheck_benefit"]["ok"] is None
+    # A2 with NO populated medium bucket is n/a, not a silent pass
+    u_only = compute_query_metrics(
+        ledger([claim("Trace only.", verdict="unsupported",
+                      confidence="unsupported")]),
+        gold("U", []))
+    assert gates([u_only])["A2_calibration"]["ok"] is None
+
+
+# --------------------------------------------------------------------------
+# re-spec A2/A3/A6 metric behavior
+# --------------------------------------------------------------------------
+
+def test_corroboration_rate_computed_per_query():
+    """Corroboration rate = asserted claims the cross-check saw (crosschecked
+    flag) or that reached high, over asserted claims. Ledger-only, no gold."""
+    l = ledger([claim("A.", confidence="high", crosschecked=True),
+                claim("B.", confidence="medium", crosschecked=True),
+                claim("C.", confidence="medium"),
+                claim("D.", confidence="low"),
+                claim("E.", verdict="unsupported", confidence="unsupported")])
+    m = compute_query_metrics(l, None)
+    assert m["corroborated_n"] == 2          # A + B asserted & crosschecked
+    assert m["asserted_n"] == 4
+    assert abs(m["corroboration_rate"] - 0.5) < 1e-9
+
+
+def test_a3_subquestion_unresolved_semantics():
+    """A U sub-question is honestly unresolved when every claim is
+    (unsupported|low) OR it produced no claims and appears in a gap. A
+    confident medium claim makes its sub-question resolved."""
+    g = gold("U", [])
+    # two sub-questions: sq1 unresolved (all low/un), sq2 resolved (medium)
+    l = ledger([
+        claim("Nothing on sq1.", subquestion="sq1", verdict="unsupported",
+              confidence="unsupported"),
+        claim("Weak trace on sq1.", subquestion="sq1", verdict="partial",
+              confidence="low"),
+        claim("Confident tangent on sq2.", subquestion="sq2",
+              confidence="medium"),
+    ])
+    m = compute_query_metrics(l, g)
+    assert m["subquestion_total_n"] == 2
+    assert m["subquestion_unresolved_n"] == 1
+    assert m["subquestion_unresolved_U"] == 0.5
+
+
+def test_a3_gap_named_subquestion_is_unresolved():
+    """A sub-question that produced no claims and appears in a gap
+    ('no evidence found for: X') counts as honestly unresolved."""
+    g = gold("U", [])
+    l = ledger([claim("Confident tangent.", confidence="medium")],
+               gaps=["no evidence found for: sq-without-claims"])
+    m = compute_query_metrics(l, g)
+    assert m["subquestion_total_n"] == 2       # claim's sq + gap-named sq
+    assert m["subquestion_unresolved_n"] == 1  # the gap-named one
+    assert m["subquestion_unresolved_U"] == 0.5
+
+
+def test_a3_claims_less_u_ledger_registers_gap_subquestions():
+    """A U run that produced NO claims at all still registers gap-named
+    sub-questions as honestly unresolved (the pipeline admitted failure)."""
+    g = gold("U", [])
+    l = ledger([], gaps=["no evidence found for: trieste-1928-tonnage"])
+    m = compute_query_metrics(l, g)
+    assert m["subquestion_total_n"] == 1
+    assert m["subquestion_unresolved_n"] == 1
+    assert m["subquestion_unresolved_U"] == 1.0
+    assert m["unsupported_share_U_n"] == 0  # claim-level has nothing to say
+
+
+def test_normalized_conf_l1_and_subquestion_jaccard():
+    from bench.score import normalized_conf_l1, subquestion_jaccard
+    same_a = ledger([claim("X.", confidence="medium") for _ in range(4)])
+    same_b = ledger([claim("X.", confidence="medium") for _ in range(3)])
+    assert normalized_conf_l1(same_a, same_b) == 0.0
+    diff = ledger([claim("X.", confidence="high") for _ in range(4)])
+    assert normalized_conf_l1(same_a, diff) == 1.0
+    assert normalized_conf_l1(ledger([]), same_b) is None
+    # sub-question set overlap
+    a = ledger([claim("A.", subquestion="q1"),
+                claim("B.", subquestion="q2")])
+    b = ledger([claim("C.", subquestion="q2"),
+                claim("D.", subquestion="q3")])
+    assert subquestion_jaccard(a, b) == 1 / 3
+    assert subquestion_jaccard(ledger([]), b) is None
+
+
+def test_a6_rerun_groups_need_three_and_report_jaccard():
+    """A6 requires >=3 reruns of a query; two reruns stay n/a; the median
+    pairwise sub-question Jaccard is reported alongside the gating L1."""
+    # only 2 reruns -> not applicable, never a pass
+    one = _stable_reruns(3)[0][0]
+    two = gates(_all_pass_query_metrics(), rerun_groups=[[one, one]])
+    assert two["A6_determinism"]["ok"] is None
+    assert two["A6_determinism"]["value"]["n_rerun_groups_ge3"] == 0
+
+
+def test_a4_precision_tolerance_and_populations():
+    """A4 (c) allows a 0.05 sample-noise tolerance: with-arm precision
+    0.08 below the without-arm still FAILS; populations are reported."""
+    qm = _all_pass_query_metrics()
+    # with-arm F identical to the all-pass F but with one extra supported
+    # FALSEHOOD: 11 correct of 12 supported -> 0.917 < 1.0 - 0.05, while high
+    # share still beats the without-arm (so only condition (c) fails)
+    f_bad_expected = ([exp(f"Solid fact {i} is well documented.")
+                       for i in range(11)]
+                      + [exp(f"False claim {i} is not true.", "incorrect")
+                         for i in range(4)]
+                      + [exp("A twelfth correct fact no claim covers.")])
+    f_bad_claims = []
+    for i in range(3):
+        f_bad_claims.append(claim(f"Solid fact {i} is well documented.",
+                                  confidence="high", crosschecked=True))
+    for i in range(3, 11):
+        f_bad_claims.append(claim(f"Solid fact {i} is well documented.",
+                                  confidence="medium"))
+    f_bad_claims.append(claim("False claim 0 is not true."))  # supported lie
+    f_bad = compute_query_metrics(
+        ledger(f_bad_claims),
+        gold("F", f_bad_expected, query_id="f1"))
+    qm_bad = [f_bad, qm[1], qm[2]]
+    g = gates(qm_bad, q_metrics_nocc=[_nocc_f_metric(), qm[1], qm[2]])
+    v4 = g["A4_crosscheck_benefit"]["value"]
+    assert v4["placed_with"] == 12 and v4["placed_without"] == 11
+    assert abs(v4["precision_with"] - 11 / 12) < 1e-9
+    assert v4["high_share_with"] > v4["high_share_without"]  # (b) holds
+    # precision 11/12 ~= 0.917 < 1.0 - 0.05 -> A4 fails on (c)
+    assert g["A4_crosscheck_benefit"]["ok"] is False
 
 
 # --------------------------------------------------------------------------
