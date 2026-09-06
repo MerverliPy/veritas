@@ -564,10 +564,15 @@ def main() -> int:
             if err:
                 p.error(f"relevance rejected: {err}")
             relevance_list = judgements
-        # Rescore arm is crosscheck 'on' unless the original run was a nocc
-        # arm (then a valid paired arm must itself be crosscheck-off's
-        # opposite: i.e. the paired arm's crosscheck must differ).
+        # A4's main position is the cross-check-ON arm: gates() reads
+        # ``q_metrics`` as the with-arm. Rescoring an off-arm run with a
+        # paired cc-arm would evaluate the deltas in reverse (a genuinely
+        # beneficial pair reported as failure) — reject it (Codex).
         main_cc = prov.get("crosscheck") != "off"
+        if not main_cc and args.paired_arm:
+            p.error("--paired-arm with a crosscheck=off main run would "
+                    "reverse A4; rescore the crosscheck=on run instead and "
+                    "pass the off-arm as --paired-arm")
         paired_metrics = _load_optional_paired(
             args.paired_arm, parser=p,
             require_crosscheck="off" if main_cc else "on",
@@ -575,6 +580,10 @@ def main() -> int:
             expected=resolved)
         rerun_groups = _load_optional_reruns(args.rerun_dirs, parser=p,
                                              queries=resolved)
+        if args.rerun_dirs and not rerun_groups:
+            p.error("--rerun-dirs produced no usable determinism group: no "
+                    "query has >=3 readable same-query rerun ledgers in the "
+                    "given dirs")
         return _rescore_main(run_dir, resolved, gold_dir, judge_enabled,
                              relevance_list, args.no_crosscheck or nocc_orig,
                              args.cap_usd,
@@ -598,6 +607,12 @@ def main() -> int:
     # Resolve comparison inputs BEFORE any paid mission runs (Codex): a
     # malformed paired scorecard or rerun dir must fail before spending the
     # budget, never after the loop has consumed it.
+    if args.no_crosscheck and args.paired_arm:
+        # A fresh --no-crosscheck mission IS the off-arm; pairing it with a
+        # cc run would reverse A4 (q_metrics is always the with-arm).
+        p.error("--paired-arm with a --no-crosscheck run would reverse A4; "
+                "run the mainline (crosscheck on) run and pass the off-arm "
+                "as --paired-arm")
     paired_metrics = _load_optional_paired(
         args.paired_arm, parser=p,
         require_crosscheck="off" if not args.no_crosscheck else "on",
@@ -605,6 +620,9 @@ def main() -> int:
         expected=queries)
     rerun_groups = _load_optional_reruns(args.rerun_dirs, parser=p,
                                          queries=queries)
+    if args.rerun_dirs and not rerun_groups:
+        p.error("--rerun-dirs produced no usable determinism group: no query "
+                "has >=3 readable same-query rerun ledgers in the given dirs")
 
     print(f"[bench] {len(queries)} query(s), cap ${args.cap_usd:.2f}, "
           f"crosscheck={'off' if args.no_crosscheck else 'on'}, "
