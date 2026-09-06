@@ -6,12 +6,16 @@ run's claims *deterministically*:
 
 * corroboration — every cross-run claim is put through the same LLM
   verifier as primary claims FIRST (never trusted unchecked). A verified
-  cross-run claim sharing most significant tokens with a primary claim is
-  independent agreement: if the primary is ``supported`` and the agreeing
-  claim cites a genuinely new source, confidence rises to ``high`` and that
-  source's evidence is adopted onto the primary. Unverified echoes never
-  corroborate. Token matching is conservative by design: a wrong
-  'agreement' is worse than none.
+  cross-run claim that is TOKEN-IDENTICAL to a primary claim (same
+  substantive words and numbers) is independent agreement: if the primary
+  is ``supported`` and the agreeing claim cites a genuinely new supporting
+  source, confidence rises to ``high`` and that source's evidence is
+  adopted onto the primary. Near-identical claims that differ in any
+  material token (a different month, number or qualifier — or a negation)
+  are possible conflicts, never lexical agreements: they are deferred to
+  the semantic same-fact pass or appended so ``detect_contradictions``
+  sees both sides. Unverified echoes never corroborate. Token matching is
+  conservative by design: a wrong 'agreement' is worse than none.
 * candidates — cross-run claims with no primary counterpart are
   *candidates*: verified like every other cross claim, then appended with a
   note marking their origin (unless a later semantic pass consumes them as
@@ -44,7 +48,11 @@ from .verify import verify_claim
 
 
 def _sig_tokens(statement: str) -> set[str]:
-    return set(re.findall(r"[a-z0-9_]{4,}", statement.lower()))
+    """Significant tokens: substantive words (>=4 chars) plus number runs of
+    2+ digits. Numbers are material values — '10 batches' vs '20 batches' or
+    'March 2025' vs 'April 2025' must read as DIFFERENT claims even though
+    their wording otherwise overlaps."""
+    return set(re.findall(r"[a-z_]{4,}|\d{2,}", statement.lower()))
 
 
 # strong negation cues: a claim carrying one of these on ONE side of a
@@ -195,11 +203,14 @@ def reconcile(
 ) -> dict:
     """Deterministic corroboration + candidate selection. See module doc.
 
-    ``cross`` claims must already have passed ``verify_claim``: only a
-    verified-SUPPORTED lexical match may set ``crosschecked`` or promote to
-    ``high`` (its new-source evidence is then adopted onto the primary).
-    Non-matching claims become ``candidates`` for the semantic pass and the
-    appended-claims list."""
+    ``cross`` claims must already have passed ``verify_claim``. Lexical
+    corroboration requires a TOKEN-IDENTICAL statement (same substantive
+    words AND numbers): material differences are value conflicts, so such
+    claims are surfaced as ``candidates`` (semantic same-fact pass or the
+    conflict detector) rather than consumed as agreement. A verified-SUPPORTED
+    identical echo may set ``crosschecked`` or promote to ``high`` (only on a
+    genuinely new supporting locator; its evidence is then adopted onto the
+    primary). Non-matching claims become ``candidates`` too."""
     matched_primary: set[str] = set()
     candidates: list[Claim] = []
     for xc in cross:
@@ -216,6 +227,17 @@ def reconcile(
                 best = (sim, pc)
         sim, pc = best
         if pc is not None and sim >= 0.5:
+            # lexical agreement requires a TOKEN-IDENTICAL statement: any
+            # material difference (a different month, number, or qualifier) is
+            # a possible value conflict, and consuming it here would hide the
+            # contradiction from detect_contradictions. Near-identical but
+            # non-identical claims are deferred to the semantic same-fact
+            # pass / appended for the conflict detector (Codex round-7 P1:
+            # 'released in March 2025' vs 'released in April 2025' both pass
+            # the old 0.5 Jaccard and same-polarity checks).
+            if xt != _sig_tokens(pc.statement):
+                candidates.append(xc)
+                continue
             # only a VERIFIED-SUPPORTED donor may corroborate: a lexical echo
             # that failed verification (unsupported/contradicted) is consumed
             # without marking the primary — it must never set crosschecked or
@@ -223,10 +245,10 @@ def reconcile(
             if xc.verdict is not Verdict.SUPPORTED:
                 continue
             # polarity check: "released in March" vs "NOT released in March"
-            # share every significant token ('not' is a stopword) — agreement
-            # would consume a verified negation and hide the contradiction.
-            # Opposite polarity on a lexical match goes to the candidates so
-            # both sides reach detect_contradictions (Codex round-6 P1).
+            # are token-identical yet assert opposite facts ('not' is not in
+            # the signature) — opposite polarity never corroborates; the
+            # claim is surfaced so both sides reach detect_contradictions
+            # (Codex round-6 P1).
             if _has_negation(pc.statement) != _has_negation(xc.statement):
                 candidates.append(xc)
                 continue

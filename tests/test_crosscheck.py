@@ -30,7 +30,7 @@ def claim(statement: str, url: str, verdict: Verdict = Verdict.SUPPORTED,
 
 def test_independent_corroboration_bumps_to_high():
     pc = claim("Veritas ships a nightly JSON batch process", "https://a.example/x")
-    xc = claim("Veritas ships a nightly JSON batch process regularly",
+    xc = claim("Veritas ships a nightly JSON batch process",
                "https://b.example/y", cid="x1")
     result = reconcile([pc], [xc])
     assert pc.confidence == "high"
@@ -39,9 +39,50 @@ def test_independent_corroboration_bumps_to_high():
     assert result["candidates"] == []
 
 
+def test_reconcile_defers_near_identical_echo_with_extra_word():
+    """Lexical corroboration needs a TOKEN-IDENTICAL statement: an echo that
+    adds a qualifier differs in a material token and may disagree with the
+    primary on it — it is deferred to the semantic/conflict path, never
+    consumed as agreement (Codex round-7 P1)."""
+    pc = claim("Veritas ships a nightly JSON batch process", "https://a.example/x")
+    xc = claim("Veritas ships a nightly JSON batch process regularly",
+               "https://b.example/y", cid="x1")
+    result = reconcile([pc], [xc])
+    assert result["corroborated"] == 0
+    assert pc.crosschecked is False
+    assert pc.confidence == "medium"
+    assert xc in result["candidates"]
+
+
+def test_reconcile_defers_value_conflicting_match():
+    """Same-polarity claims that disagree on a material VALUE ('March 2025'
+    vs 'April 2025') share most tokens but are not the same fact: deferring
+    lets detect_contradictions see the pair (Codex round-7 P1)."""
+    pc = claim("Version 2.0 was released in March 2025", "https://a.example/x")
+    xc = claim("Version 2.0 was released in April 2025",
+               "https://b.example/y", cid="x1")
+    result = reconcile([pc], [xc])
+    assert result["corroborated"] == 0
+    assert pc.crosschecked is False
+    assert pc.confidence == "medium"
+    assert xc in result["candidates"]
+
+
+def test_reconcile_defers_numeric_conflict():
+    """Numbers are material: '20 percent' vs '30 percent' must not corroborate
+    even though the wording is otherwise identical."""
+    pc = claim("The treatment reduced mortality by 20 percent", "https://a.example/x")
+    xc = claim("The treatment reduced mortality by 30 percent",
+               "https://b.example/y", cid="x1")
+    result = reconcile([pc], [xc])
+    assert result["corroborated"] == 0
+    assert pc.crosschecked is False
+    assert xc in result["candidates"]
+
+
 def test_same_sources_do_not_bump_to_high():
     pc = claim("The release happened in March 2025", "https://a.example/x")
-    xc = claim("The release happened in March 2025 per changelog",
+    xc = claim("The release happened in March 2025",
                "https://a.example/x", cid="x1")  # same locator
     reconcile([pc], [xc])
     assert pc.confidence == "medium"
@@ -82,7 +123,7 @@ def test_reconcile_promotion_adopts_verified_evidence():
     promotion; its new-source evidence is adopted onto the primary so the
     report/ledger keep the independent source (Codex P1)."""
     pc = claim("Veritas ships a nightly JSON batch process", "https://a.example/x")
-    xc = claim("Veritas ships a nightly JSON batch process regularly",
+    xc = claim("Veritas ships a nightly JSON batch process",
                "https://b.example/y", cid="x1")
     result = reconcile([pc], [xc])
     assert result["corroborated"] == 1
