@@ -115,7 +115,9 @@ _ANTONYM_PAIRS = (("granted", "rejected"), ("valid", "invalid"))
 _STATUS_SYNONYMS = {"issued": "granted", "awarded": "granted",
                      "allowed": "granted", "approved": "granted",
                      "patented": "granted", "invalidated": "invalid",
-                     "unenforceable": "invalid"}
+                     "unenforceable": "invalid", "voided": "invalid",
+                     "vacated": "invalid", "revoked": "invalid",
+                     "overturned": "invalid", "cancelled": "invalid"}
 
 
 def _negation_count(text: str) -> int:
