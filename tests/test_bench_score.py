@@ -570,6 +570,131 @@ def test_load_paired_metrics_rejects_wrong_arm_or_drift(tmp_path):
                             require_gold_judge_on=True, expected=expected)
 
 
+def test_load_paired_metrics_binds_gold_and_scorer_revision(tmp_path):
+    """Codex P1: A4 must never compare a main arm scored under the current
+    gold/scorer against a paired arm scored under older gold/scorer
+    semantics. When gold_dir is supplied the loader requires the paired
+    run's recorded gold_rev == current sheets' revision AND scorer_rev ==
+    the current scorer; stale or unverifiable pairs are rejected loudly."""
+    import bench.run_benchmark as rb
+    gold_dir = tmp_path / "gold"
+    gold_dir.mkdir()
+    _gold_file(gold_dir, "f1")
+    qs = [{"id": "f1", "ok": True, "query": "q f1", "class": "F",
+           "metrics": {"class": "F"}}]
+    expected = [{"id": "f1", "query": "q f1", "class": "F"}]
+
+    def _write(provenance_extra):
+        arm = tmp_path / "nocc"
+        (arm / "scorecard.json").parent.mkdir(parents=True, exist_ok=True)
+        prov = {"crosscheck": "off", "gold_judge": "on"}
+        prov.update(provenance_extra)
+        (arm / "scorecard.json").write_text(json.dumps(
+            {"provenance": prov, "queries": qs}))
+        return arm
+
+    current = rb.gold_revision(gold_dir, ["f1"])
+    # matching gold + scorer -> accepted
+    arm = _write({"scorer_rev": rb.SCORER_REVISION, "gold_rev": current})
+    out = rb.load_paired_metrics(arm, require_crosscheck="off",
+                                 require_gold_judge_on=True,
+                                 expected=expected, gold_dir=gold_dir)
+    assert [m["query_id"] for m in out] == ["f1"]
+    # stale gold (sheet edited since the paired run) -> rejected
+    arm2 = _write({"scorer_rev": rb.SCORER_REVISION,
+                   "gold_rev": current + "ff"})
+    with pytest.raises(ValueError, match="gold revision"):
+        rb.load_paired_metrics(arm2, require_crosscheck="off",
+                               require_gold_judge_on=True,
+                               expected=expected, gold_dir=gold_dir)
+    # older scorer revision -> rejected
+    arm3 = _write({"scorer_rev": "pre-gate-respec", "gold_rev": current})
+    with pytest.raises(ValueError, match="scorer revision"):
+        rb.load_paired_metrics(arm3, require_crosscheck="off",
+                               require_gold_judge_on=True,
+                               expected=expected, gold_dir=gold_dir)
+    # no recorded revisions (pre-binding run) -> rejected, not guessed
+    arm4 = _write({})
+    with pytest.raises(ValueError, match="scorer revision"):
+        rb.load_paired_metrics(arm4, require_crosscheck="off",
+                               require_gold_judge_on=True,
+                               expected=expected, gold_dir=gold_dir)
+
+
+def test_gold_revision_content_sensitive_and_deterministic(tmp_path):
+    """gold_revision hashes sheet content + presence: unchanged sheets give
+    the same revision; an edit or added sheet changes it."""
+    import bench.run_benchmark as rb
+    gold_dir = tmp_path / "gold"
+    gold_dir.mkdir()
+    _gold_file(gold_dir, "f1")
+    _gold_file(gold_dir, "d1", "D")
+    rev1 = rb.gold_revision(gold_dir, ["f1", "d1"])
+    assert rev1 == rb.gold_revision(gold_dir, ["d1", "f1"])  # order-free
+    (gold_dir / "f1.json").write_text(json.dumps({"query_id": "f1",
+                                                   "class": "F",
+                                                   "changed": True}))
+    assert rb.gold_revision(gold_dir, ["f1", "d1"]) != rev1
+    rev2 = rb.gold_revision(gold_dir, ["f1", "d1"])
+    assert rev2 == rb.gold_revision(gold_dir, ["f1", "d1"])  # deterministic
+
+
+def test_load_paired_metrics_prefers_rescore_scorecard(tmp_path):
+    """A paired run that was re-scored (scorecard-rescore.json present) is
+    used instead of the original scorecard — the owner can refresh a stale
+    paired arm under current gold without new paid missions."""
+    import bench.run_benchmark as rb
+    gold_dir = tmp_path / "gold"
+    gold_dir.mkdir()
+    _gold_file(gold_dir, "f1")
+    current = rb.gold_revision(gold_dir, ["f1"])
+    expected = [{"id": "f1", "query": "q f1", "class": "F"}]
+    arm = tmp_path / "paired"
+    arm.mkdir()
+    # stale original scorecard (old gold revision, old scorer)
+    (arm / "scorecard.json").write_text(json.dumps({
+        "provenance": {"crosscheck": "off", "gold_judge": "on",
+                         "scorer_rev": "pre-gate-respec",
+                         "gold_rev": "deadbeef"},
+        "queries": [{"id": "f1", "ok": True, "query": "q f1",
+                      "class": "F", "metrics": {"class": "F"}}]}))
+    # fresh re-score under the current gold/scorer
+    (arm / "scorecard-rescore.json").write_text(json.dumps({
+        "provenance": {"crosscheck": "off", "gold_judge": "on",
+                         "scorer_rev": rb.SCORER_REVISION,
+                         "gold_rev": current},
+        "queries": [{"id": "f1", "ok": True, "query": "q f1",
+                      "class": "F", "metrics": {"class": "F",
+                                                     "precision_supported": 1.0}}]}))
+    out = rb.load_paired_metrics(arm, require_crosscheck="off",
+                                 require_gold_judge_on=True,
+                                 expected=expected, gold_dir=gold_dir)
+    assert out and out[0].get("precision_supported") == 1.0
+
+
+def test_rescore_provenance_records_crosscheck_and_revisions(tmp_path):
+    """A scorecard-rescore.json must be self-describing: it records the
+    ORIGINAL run's crosscheck arm plus the gold/scorer revisions it was
+    rescored under, so it can later serve as a bound paired arm."""
+    import bench.run_benchmark as rb
+    gold_dir = tmp_path / "gold"
+    gold_dir.mkdir()
+    _gold_file(gold_dir, "f1")
+    run_dir = tmp_path / "run"
+    (run_dir / "f1").mkdir(parents=True)
+    (run_dir / "f1" / "ledger.json").write_text(json.dumps(ledger([
+        claim("Fact one is true.")])))
+    queries = [{"id": "f1", "class": "F", "query": "q f1"}]
+    rb._rescore_main(run_dir, queries, gold_dir, judge_enabled=False,
+                     relevance=None, no_crosscheck=False, cap_usd=10.0,
+                     crosscheck="on")
+    sc = json.loads((run_dir / "scorecard-rescore.json").read_text())
+    prov = sc["provenance"]
+    assert prov["crosscheck"] == "on"
+    assert prov["scorer_rev"] == rb.SCORER_REVISION
+    assert prov["gold_rev"] == rb.gold_revision(gold_dir, ["f1"])
+
+
 def test_collect_rerun_groups_requires_three_same_query_ledgers(tmp_path):
     """A6 determinism helper groups ledgers per query id; a query needs >=3
     rerun dirs to form a group; corrupt reruns are skipped, not fatal."""

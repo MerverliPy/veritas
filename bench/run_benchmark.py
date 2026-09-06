@@ -39,6 +39,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))  # allow running from anywhere
 
+# Scorer semantics revision. Bumped whenever bench/score.py metric/gate
+# semantics change; recorded in scorecard provenance so A4 never pairs a
+# main arm scored under one scorer revision with a paired arm scored under
+# another (judge-vs-lexical mode is already checked separately).
+SCORER_REVISION = "r1-gate-respec-1"
+
 from bench.score import (  # noqa: E402
     CLASSES,
     CONFIDENCE_ORDER,
@@ -53,10 +59,35 @@ from bench.score import (  # noqa: E402
 _GOLD_LABELS = ("correct", "incorrect", "contested")
 
 
+def gold_revision(gold_dir: Path, query_ids: list[str]) -> str:
+    """Deterministic revision of the gold sheets backing ``query_ids``
+    (sha1 over sorted ids + sheet bytes; a missing sheet hashes a marker so
+    presence changes also alter the revision). Recorded in scorecard
+    provenance at scoring time and re-derived from the CURRENT sheets when a
+    paired arm is loaded, so A4 can never compare metrics produced under two
+    different gold revisions."""
+    h = hashlib.sha1()
+    for qid in sorted(set(query_ids)):
+        h.update(qid.encode("utf-8"))
+        p = Path(gold_dir) / f"{qid}.json"
+        h.update(p.read_bytes() if p.exists() else b"<no-sheet>")
+    return h.hexdigest()[:12]
+
+
+def _scored_gold_ids(entries: list[dict], gold_dir: Path) -> list[str]:
+    """Ids of ok, metric-bearing scorecard entries whose gold sheet exists
+    (structure-only no-sheet queries are excluded — they carry no gold to
+    bind). Used to record the gold revision a scorecard was scored under."""
+    return sorted({e["id"] for e in entries
+                   if e.get("ok") and e.get("metrics")
+                   and (Path(gold_dir) / f"{e['id']}.json").exists()})
+
+
 def _load_optional_paired(paired_arm: str | None, *, parser=None,
                           require_crosscheck: str | None = None,
                           require_gold_judge_on: bool | None = None,
-                          expected: list[dict] | None = None) \
+                          expected: list[dict] | None = None,
+                          gold_dir: Path | None = None) \
         -> list[dict] | None:
     """Resolve --paired-arm to the other arm's metric list (A4 same-query
     pairing) or None. Errors abort loudly — a silently-ignored paired arm
@@ -67,7 +98,8 @@ def _load_optional_paired(paired_arm: str | None, *, parser=None,
         out = load_paired_metrics(paired_arm,
                                   require_crosscheck=require_crosscheck,
                                   require_gold_judge_on=require_gold_judge_on,
-                                  expected=expected)
+                                  expected=expected,
+                                  gold_dir=gold_dir)
     except (ValueError, OSError) as e:
         if parser is not None:
             parser.error(f"paired arm rejected: {e}")
@@ -103,28 +135,44 @@ def _load_optional_reruns(rerun_dirs: str | None, *, parser=None,
 def load_paired_metrics(run_dir: Path, *,
                         require_crosscheck: str | None = None,
                         require_gold_judge_on: bool | None = None,
-                        expected: list[dict] | None = None) -> list[dict]:
-    """Load the OTHER arm's per-query metric list from its scorecard for a
-    same-query A4 comparison (re-spec A4). Returns the metric dicts of that
-    run's ok, scored queries, with ``query_id`` injected from the scorecard
-    entry when the scorer predates the query_id field so pairing still works.
+                        expected: list[dict] | None = None,
+                        gold_dir: Path | None = None) -> list[dict]:
+    """Load the OTHER arm's per-query metric list for a same-query A4
+    comparison (re-spec A4). Returns the metric dicts of that run's ok,
+    scored queries, with ``query_id`` injected from the scorecard entry when
+    the scorer predates the query_id field so pairing still works.
 
     Validation (Codex): the paired arm must be the OPPOSITE cross-check arm
     (``require_crosscheck``), scored under the SAME gold-judge mode
     (``require_gold_judge_on``; judge vs lexical compute precision
-    differently), and each paired query's recorded text/class must match the
-    main arm's expected query — pairing unrelated missions or two enabled
-    arms must never produce a gate."""
-    sc = Path(run_dir) / "scorecard.json"
+    differently), each paired query's recorded text/class must match the
+    main arm's expected query, and when ``gold_dir`` is given the paired
+    run must have been scored under the SAME gold revision and scorer
+    revision as the current run — pairing unrelated missions, two enabled
+    arms, mixed scoring modes, or stale gold/scorer semantics must never
+    produce a gate.
+
+    A ``scorecard-rescore.json`` (a re-score of this run under the current
+    gold/scorer) is preferred over the original ``scorecard.json`` when
+    present — the owner can refresh a stale paired arm without new paid
+    missions."""
+    rescore_sc = Path(run_dir) / "scorecard-rescore.json"
+    sc = rescore_sc if rescore_sc.exists() \
+        else Path(run_dir) / "scorecard.json"
     if not sc.exists():
         raise ValueError(f"paired-arm run has no scorecard.json: {run_dir}")
     data = load_json(sc)
     prov = data.get("provenance", {})
-    if require_crosscheck is not None and \
-            prov.get("crosscheck") not in (None, require_crosscheck):
-        raise ValueError(f"paired-arm run crosscheck is "
-                         f"{prov.get('crosscheck')!r}, expected "
-                         f"{require_crosscheck!r} (it must be the OTHER arm)")
+    if require_crosscheck is not None:
+        cc = prov.get("crosscheck")
+        if cc is None:
+            raise ValueError("paired-arm scorecard records no crosscheck arm; "
+                             "re-run or --rescore the paired arm under the "
+                             "current code so A4 can verify it is the OTHER arm")
+        if cc != require_crosscheck:
+            raise ValueError(f"paired-arm run crosscheck is "
+                             f"{cc!r}, expected "
+                             f"{require_crosscheck!r} (it must be the OTHER arm)")
     if require_gold_judge_on is not None:
         gj = prov.get("gold_judge")
         if gj is None:
@@ -134,6 +182,29 @@ def load_paired_metrics(run_dir: Path, *,
             raise ValueError(f"paired-arm gold_judge {gj!r} does not match the "
                              f"main arm's scoring mode (judge vs lexical "
                              f"compute precision differently)")
+    if gold_dir is not None:
+        # Gold + scorer binding: the paired metrics were computed against the
+        # gold sheets and scorer semantics recorded in ITS provenance. If the
+        # sheets or score.py semantics changed since that run, A4 would compare
+        # current main-arm precision against stale paired-arm precision — reject
+        # loudly and tell the owner how to refresh (no paid missions needed).
+        rec_scorer = prov.get("scorer_rev")
+        if rec_scorer != SCORER_REVISION:
+            raise ValueError(
+                f"paired-arm run was scored under scorer revision "
+                f"{rec_scorer!r}, current is {SCORER_REVISION!r}; re-run or "
+                f"--rescore the paired arm under the current code so A4 "
+                f"compares identical scorer semantics")
+        recorded_gold = prov.get("gold_rev")
+        paired_scored = _scored_gold_ids(data.get("queries", []), gold_dir)
+        current_gold = gold_revision(gold_dir, paired_scored)
+        if recorded_gold != current_gold:
+            raise ValueError(
+                f"paired-arm run was scored under gold revision "
+                f"{recorded_gold!r}, current gold revision is "
+                f"{current_gold!r}; gold sheets changed since that run — "
+                f"re-run or --rescore the paired arm under the current gold "
+                f"so A4 compares identical gold semantics")
     expected_by_id = {q.get("id"): q for q in (expected or [])
                       if q.get("id")}
     out: list[dict] = []
@@ -303,13 +374,17 @@ def _assess(q: dict, qtext: str, qout: Path, gold_dir: Path,
 def _rescore_main(run_dir: Path, queries: list[dict], gold_dir: Path,
                   judge_enabled: bool, relevance: list[int] | None,
                   no_crosscheck: bool, cap_usd: float,
+                  crosscheck: str = "on",
                   paired_metrics: list[dict] | None = None,
                   rerun_groups: list[list[dict]] | None = None) -> int:
     """Score an existing run dir without new missions. Relevance judgements
     are bound to this run's sample by the caller; the judge spend respects
     the cap. ``paired_metrics`` (the cross-check-off arm's metrics) and
     ``rerun_groups`` (>=3 same-query rerun ledgers) feed the re-spec A4/A6
-    gates when the owner supplies them."""
+    gates when the owner supplies them. ``crosscheck`` is the ORIGINAL
+    run's arm (from its scorecard provenance), recorded in the rescore
+    artifact so a rescored run is self-describing when later used as a
+    paired arm; gold/scorer revisions are bound the same way."""
     per_query = []
     capped = False
     total_usd = 0.0
@@ -356,6 +431,10 @@ def _rescore_main(run_dir: Path, queries: list[dict], gold_dir: Path,
             "of_run": run_dir.name,
             "created_at": datetime.datetime.now(datetime.timezone.utc)
                 .isoformat(),
+            "crosscheck": crosscheck,
+            "scorer_rev": SCORER_REVISION,
+            "gold_rev": gold_revision(gold_dir, _scored_gold_ids(
+                per_query, gold_dir)),
             "gold_judge": ("on" if judge_enabled
                            else "off(--no-judge or no backend)"),
             "relevance_judgements": len(relevance) if relevance else 0,
@@ -577,7 +656,8 @@ def main() -> int:
             args.paired_arm, parser=p,
             require_crosscheck="off" if main_cc else "on",
             require_gold_judge_on=judge_enabled,
-            expected=resolved)
+            expected=resolved,
+            gold_dir=gold_dir)
         rerun_groups = _load_optional_reruns(args.rerun_dirs, parser=p,
                                              queries=resolved)
         if args.rerun_dirs and not rerun_groups:
@@ -587,6 +667,7 @@ def main() -> int:
         return _rescore_main(run_dir, resolved, gold_dir, judge_enabled,
                              relevance_list, args.no_crosscheck or nocc_orig,
                              args.cap_usd,
+                             crosscheck="off" if nocc_orig else "on",
                              paired_metrics=paired_metrics,
                              rerun_groups=rerun_groups)
 
@@ -617,7 +698,8 @@ def main() -> int:
         args.paired_arm, parser=p,
         require_crosscheck="off" if not args.no_crosscheck else "on",
         require_gold_judge_on=judge_enabled,
-        expected=queries)
+        expected=queries,
+        gold_dir=gold_dir)
     rerun_groups = _load_optional_reruns(args.rerun_dirs, parser=p,
                                          queries=queries)
     if args.rerun_dirs and not rerun_groups:
@@ -738,6 +820,9 @@ def main() -> int:
         "query_ids": [q["id"] for q in queries],
         "queries_sha": hashlib.sha1(
             json.dumps(queries, sort_keys=True).encode()).hexdigest()[:12],
+        "scorer_rev": SCORER_REVISION,
+        "gold_rev": gold_revision(gold_dir, _scored_gold_ids(
+            per_query, gold_dir)),
         "crosscheck": "off" if args.no_crosscheck else "on",
         "gold_judge": ("off(--no-judge)" if args.no_judge
                         else "off(no reasoning backend)" if not judge_enabled

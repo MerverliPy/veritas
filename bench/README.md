@@ -75,6 +75,26 @@ Each rerun/paired dir holds per-query `out/bench/<run>/<query-id>/ledger.json`
 subdirs (the normal layout). Statement-level `flip_rate` is informational
 under the re-spec; the A6 gate is distribution-level.
 
+### Gold/scorer binding (A4 pairing)
+
+Every scorecard records the gold-sheet revision (`gold_rev`) and scorer
+revision (`scorer_rev`) its metrics were computed under. A paired arm is
+accepted only when both match the current revisions — a run scored under
+older gold or scorer semantics is rejected with a clear error, never
+silently compared (A4 would otherwise pit current-gold main-arm precision
+against stale paired-arm precision). If the gold sheets or `score.py`
+semantics changed after the paired arm ran, refresh it WITHOUT new paid
+missions by re-scoring it first:
+
+```bash
+python3 bench/run_benchmark.py --rescore out/bench/full-1-nocc   # refresh
+python3 bench/run_benchmark.py --rescore out/bench/full-1 \
+    --paired-arm out/bench/full-1-nocc                            # now pairs
+```
+
+`load_paired_metrics` prefers `scorecard-rescore.json` when present, so the
+refreshed arm is picked up automatically.
+
 ## Boundaries
 
 - Scores come only from `ledger.json` + gold — the driver never inspects
