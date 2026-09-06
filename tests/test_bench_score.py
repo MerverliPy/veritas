@@ -1272,6 +1272,17 @@ def test_d2_radio_priority_claims_never_certified():
     assert gold_verdict("In 1943 the Supreme Court later held claims 10 and "
                         "11 invalid as anticipated by Stone's earlier patent.",
                         expected) == "correct"
+    # round 20: 'cannot', hyphenated 'non-infringed', postposed chronology
+    assert gold_verdict("The Supreme Court held claim 16 of Marconi patent "
+                        "763,772 cannot be valid or infringed.",
+                        expected) != "correct"
+    assert gold_verdict("The Supreme Court held claim 16 of Marconi patent "
+                        "763,772 valid but non-infringed.",
+                        expected) != "correct"
+    assert gold_verdict("In 1943 the United States Supreme Court held "
+                        "Marconi's claims 10 and 11 invalid as anticipated "
+                        "by Stone's patent, which was later than Marconi's.",
+                        expected) != "correct"
     # 'No.' patent abbreviation is not a negation (round-8 P2 matcher fix)
     assert gold_verdict("Tesla's patent No. 645,576 for wireless "
                         "transmission was filed in 1897 and granted in "
@@ -1474,9 +1485,10 @@ def test_negation_count_treats_patent_number_abbreviation_as_non_negation():
     assert _negation_count("no copy of the issue survived") == 1
     # a quantified negation is not an abbreviation: no period follows 'no'
     assert _negation_count("affected no 150 countries in May 2017") == 1
-    # contracted negations count (round 17)
+    # contracted negations count (round 17); closed-form cannot (round 20)
     assert _negation_count("claim 16 wasn't valid") == 1
     assert _negation_count("the claims weren't infringed") == 1
+    assert _negation_count("claim 16 cannot be valid") == 1
 
 
 def test_status_antonym_and_synonym_matching():
@@ -1509,6 +1521,9 @@ def test_status_antonym_and_synonym_matching():
     # (temporal prose) must not conflict, 'later patent' (reversed prior art) must
     assert _chronology_conflict("anticipated by Stone's later patent",
                                 "anticipated by Stone's earlier patent")
+    assert _chronology_conflict(
+        "invalid as anticipated by Stone's patent, which was later than "
+        "Marconi's", "invalid as anticipated by Stone's earlier patent")
     assert not _chronology_conflict(
         "the Court later held claims 10 and 11 invalid",
         "invalid as anticipated by Stone's earlier patent")

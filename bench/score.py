@@ -95,8 +95,8 @@ _ANCHOR_ROLES = {
     "nation": "countries", "nations": "countries",
 }
 _NEGATION = re.compile(
-    r"\b(?:not|no|never|without|nor|nothing|nobody|nowhere|neither|"
-    r"hardly|barely|unlikely|\w+n't)\b")
+    r"\b(?:not|no|never|cannot|without|nor|nothing|nobody|nowhere|"
+    r"neither|hardly|barely|unlikely|\w+n't)\b")
 
 # 'No.' used as a patent/case-number abbreviation ('No. 763,772') is not a
 # negation. Require the period so a genuine quantified negation ('no 150
@@ -138,20 +138,37 @@ _CONFLICTING_STATUSES = (("granted", "rejected"), ("valid", "invalid"),
 
 _STATUS_TERMS.update({w: "void" for w in _VOID_STATUSES})
 
-# Prior-art chronology ('Stone's earlier patent' vs 'Stone's later patent') is
-# truth-critical only when the term modifies 'patent'. 'later' is common
-# temporal prose ('the Court later held...'), so scope the conflict to the
-# 'earlier/later patent' phrase rather than unscoped token sets.
-_CHRONOLOGY_PHRASE = re.compile(r"\b(earlier|later)\s+patent\b")
+# Prior-art chronology ('Stone's earlier patent' vs 'Stone's later patent',
+# including postposed 'the patent, which was later than Marconi's') is
+# truth-critical only when the term modifies 'patent'. 'later'/'earlier' are
+# common temporal prose ('the Court later held...'), so scope the conflict to
+# occurrences within a short word window of 'patent'.
+_CHRONO_WINDOW = 5
+
+
+def _chrono_signs(text: str) -> frozenset[str]:
+    """Which chronology sign (earlier/later) is attached to a 'patent' in
+    ``text`` (preposed 'earlier patent' or postposed 'patent ... was
+    later')? Occurrences far from any 'patent' (e.g. 'the Court later
+    held') attach nothing."""
+    words = re.findall(r"[a-z0-9']+", text.lower())
+    signs: set[str] = set()
+    for i, w in enumerate(words):
+        if w not in ("earlier", "later"):
+            continue
+        lo, hi = max(0, i - _CHRONO_WINDOW), min(len(words), i + _CHRONO_WINDOW + 1)
+        if "patent" in words[lo:hi]:
+            signs.add(w)
+    return frozenset(signs)
 
 
 def _chronology_conflict(statement: str, gold: str) -> bool:
-    """True when one statement credits an earlier patent and the other a
-    later patent for the same anticipation (an 'earlier patent' claim must
-    never match an 'earlier patent' gold fact with the chronology flipped)."""
-    m1 = _CHRONOLOGY_PHRASE.search(statement.lower())
-    m2 = _CHRONOLOGY_PHRASE.search(gold.lower())
-    return bool(m1 and m2 and m1.group(1) != m2.group(1))
+    """True when one statement dates the prior-art patent earlier and the
+    other dates it later ('anticipated by an earlier patent' must never
+    match a claim that the patent came later, in either word order)."""
+    sa, sb = _chrono_signs(statement), _chrono_signs(gold)
+    return (("earlier" in sa and "later" in sb)
+            or ("later" in sa and "earlier" in sb))
 
 
 def _negation_count(text: str) -> int:
@@ -254,8 +271,12 @@ def _quantity_conflict(statement: str, gold: str) -> bool:
 
 
 def _sig_tokens(text: str) -> set[str]:
+    # Join the 'non' prefix of hyphenated forms ('non-infringed' ->
+    # 'noninfringed') so an infringement-status reversal is not tokenized
+    # into the plain term after discarding the 3-letter 'non'.
+    text = re.sub(r"\bnon-([a-z]{3,})", r"non\1", text.lower())
     return {_STATUS_SYNONYMS.get(t, t)
-            for t in re.findall(r"[a-z0-9_]{4,}", text.lower())}
+            for t in re.findall(r"[a-z0-9_]{4,}", text)}
 
 
 def _jaccard(a: str, b: str) -> float:
