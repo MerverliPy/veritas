@@ -1138,6 +1138,13 @@ def test_d2_radio_priority_claims_never_certified():
                         "invalid because they were anticipated by an earlier "
                         "patent of the American inventor John Stone Stone.",
                         expected) == "correct"
+    # concise non-verbatim formulations must still credit the anchors (P2)
+    assert gold_verdict("Tesla's patent 645,576 was filed in 1897 and "
+                        "granted in 1900.", expected) == "correct"
+    assert gold_verdict("The United States Supreme Court held claims 10 and "
+                        "11 of Marconi's patent 763,772 invalid as "
+                        "anticipated by John Stone Stone's earlier patent.",
+                        expected) == "correct"
     # the 'Court declared Tesla the inventor' overclaim must never win credit
     assert gold_verdict("In 1943 the United States Supreme Court declared "
                         "Nikola Tesla the inventor of radio.",

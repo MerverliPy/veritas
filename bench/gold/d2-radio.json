@@ -11,10 +11,24 @@
       "note": "Patent fact, not priority verdict; independently documented in the 1943 Supreme Court opinion and the patent record."
     },
     {
+      "statement": "Tesla's patent 645,576 for wireless transmission was filed in 1897 and granted in 1900.",
+      "variant_of": "In 1900 the United States Patent Office granted Nikola Tesla patent number 645,576 for a wireless transmission system, on an application filed on 2 September 1897.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Concise alternate phrasing of the Tesla patent fact so natural wording credits the same fact in lexical modes without inflating the recall denominator."
+    },
+    {
       "statement": "In Marconi Wireless Telegraph Co. of America v. United States (1943), the United States Supreme Court held that the principal tuning claims of Marconi's wireless patent number 763,772 were invalid because they were anticipated by an earlier patent of the American inventor John Stone Stone.",
       "gold_label": "correct",
       "confidence_class": "medium",
       "note": "Factual about the ruling's holding: the Court invalidated the tuning claims (10 and 11) on Stone's prior patent and separately held claim 16 valid and infringed; its discussion of Tesla's 645,576 was descriptive (a four-circuit disclosure), not a holding that Tesla anticipated the patent wholesale. Written as 'patent number 763,772' (never the 'No.' abbreviation) so the lexical negation parser cannot misread it. Wording is precise so the popular overclaim 'the Court declared Tesla the inventor of radio' cannot match this fact."
+    },
+    {
+      "statement": "In Marconi Wireless Telegraph Co. of America v. United States (1943), the United States Supreme Court held claims 10 and 11 of Marconi's patent number 763,772 invalid as anticipated by the earlier patent of the American inventor John Stone Stone.",
+      "variant_of": "In Marconi Wireless Telegraph Co. of America v. United States (1943), the United States Supreme Court held that the principal tuning claims of Marconi's wireless patent number 763,772 were invalid because they were anticipated by an earlier patent of the American inventor John Stone Stone.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Numbered-claims alternate phrasing of the ruling fact so reports naming claims 10 and 11 credit the same fact in lexical modes without inflating the recall denominator."
     },
     {
       "statement": "Nikola Tesla invented the radio, not Guglielmo Marconi.",
