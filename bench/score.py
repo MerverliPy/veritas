@@ -114,7 +114,8 @@ _STATUS_SYNONYMS = {"issued": "granted", "awarded": "granted",
                      "allowed": "granted", "approved": "granted",
                      "patented": "granted", "invalidated": "invalid",
                      "invalidates": "invalid", "invalidating": "invalid",
-                     "invalidate": "invalid"}
+                     "invalidate": "invalid", "noninfringing": "noninfringed",
+                     "noninfringement": "noninfringed"}
 
 # Adverse dispositions (voided, unenforceable, ...) are NOT synonyms of
 # 'invalid': unenforceability and invalidity are distinct patent
@@ -138,27 +139,28 @@ _CONFLICTING_STATUSES = (("granted", "rejected"), ("valid", "invalid"),
 
 _STATUS_TERMS.update({w: "void" for w in _VOID_STATUSES})
 
-# Prior-art chronology ('Stone's earlier patent' vs 'Stone's later patent',
-# including postposed 'the patent, which was later than Marconi's') is
-# truth-critical only when the term modifies 'patent'. 'later'/'earlier' are
-# common temporal prose ('the Court later held...'), so scope the conflict to
-# occurrences within a short word window of 'patent'.
-_CHRONO_WINDOW = 5
+# Prior-art chronology ('Stone's earlier patent' vs 'Stone's later
+# patent(s)', including postposed 'the patent, which was later than
+# Marconi's') is truth-critical only when the term modifies 'patent'.
+# 'earlier'/'later' in unrelated prose ('the Court later held', 'later
+# found ... anticipated') must not attach, so the checks are
+# relation-shaped: adjective adjacency ('X patent[s]') and a postposed
+# clause where the patent is the subject of was/were/is/are/filed/came/
+# been/issued + earlier/later.
+_PREPOSED_CHRONO = re.compile(r"\b(earlier|later)\s+patents?\b")
+_POSTPOSED_CHRONO = re.compile(
+    r"\bpatents?\b[^.]{0,60}?\b(?:was|were|is|are|filed|came|been|issued)"
+    r"\s+(?:much\s+|somewhat\s+|slightly\s+|even\s+)?(earlier|later)\b")
 
 
 def _chrono_signs(text: str) -> frozenset[str]:
-    """Which chronology sign (earlier/later) is attached to a 'patent' in
-    ``text`` (preposed 'earlier patent' or postposed 'patent ... was
-    later')? Occurrences far from any 'patent' (e.g. 'the Court later
-    held') attach nothing."""
-    words = re.findall(r"[a-z0-9']+", text.lower())
-    signs: set[str] = set()
-    for i, w in enumerate(words):
-        if w not in ("earlier", "later"):
-            continue
-        lo, hi = max(0, i - _CHRONO_WINDOW), min(len(words), i + _CHRONO_WINDOW + 1)
-        if "patent" in words[lo:hi]:
-            signs.add(w)
+    """Which chronology sign (earlier/later) is attached to a patent in
+    ``text``? Only relation-shaped occurrences count: an adjective directly
+    before 'patent(s)' or a postposed 'patent ... was later/filed later'
+    clause. 'the Court later held/found ...' attaches nothing."""
+    low = text.lower()
+    signs = {m.group(1) for m in _PREPOSED_CHRONO.finditer(low)}
+    signs |= {m.group(1) for m in _POSTPOSED_CHRONO.finditer(low)}
     return frozenset(signs)
 
 

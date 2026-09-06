@@ -1283,6 +1283,24 @@ def test_d2_radio_priority_claims_never_certified():
                         "Marconi's claims 10 and 11 invalid as anticipated "
                         "by Stone's patent, which was later than Marconi's.",
                         expected) != "correct"
+    # round 21: plural 'later patents', 'noninfringing', temporal 'later
+    # found' prose, and the two cited-evidence anchors
+    assert gold_verdict("In 1943 the United States Supreme Court held "
+                        "Marconi's claims 10 and 11 invalid as anticipated "
+                        "by Stone's later patents.", expected) != "correct"
+    assert gold_verdict("The Supreme Court held claim 16 of Marconi patent "
+                        "763,772 noninfringing.", expected) != "correct"
+    assert gold_verdict("In 1943 the Supreme Court later found Stone's "
+                        "earlier patent anticipated Marconi's claims 10 and "
+                        "11.", expected) == "correct"
+    assert gold_verdict("In 1893 Nikola Tesla stated publicly that his "
+                        "wireless system could transmit intelligible signals "
+                        "or power to any distance without connecting wires.",
+                        expected) == "correct"
+    assert gold_verdict("In December 1901 Guglielmo Marconi reported "
+                        "receiving a transatlantic wireless signal at St "
+                        "John's, Newfoundland, transmitted from his station "
+                        "at Poldhu, Cornwall.", expected) == "correct"
     # 'No.' patent abbreviation is not a negation (round-8 P2 matcher fix)
     assert gold_verdict("Tesla's patent No. 645,576 for wireless "
                         "transmission was filed in 1897 and granted in "

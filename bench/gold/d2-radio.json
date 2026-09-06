@@ -137,6 +137,18 @@
       "note": "Fused claim turning the Nobel record into a one-sided invention verdict (the award recognized contributions to wireless telegraphy, not 'for inventing radio'). Disputed; never scored correct or incorrect. Competing contested formulation so lexical modes downgrade the 'won ... for inventing radio' fusion away from the correct Marconi-only 'won' variant."
     },
     {
+      "statement": "In 1893 Nikola Tesla stated publicly that his wireless system could transmit intelligible signals or power to any distance without connecting wires.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Tesla-side documented record: at 1893 lectures (Franklin Institute, Philadelphia and the National Electric Light Association, St. Louis) Tesla described his wireless system's potential. Worded as a statement/prediction, not a working demonstration — the demonstrable 1890s wireless lighting experiments were separate, and this sheet must not overclaim. Verified against the Wikipedia 'Nikola Tesla' article (1893 St. Louis/Philadelphia pronouncements)."
+    },
+    {
+      "statement": "In December 1901 Guglielmo Marconi reported receiving a transatlantic wireless signal at St John's, Newfoundland, transmitted from his station at Poldhu, Cornwall.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Marconi-side documented record framed as a report: Marconi's 12 December 1901 announcement of reception at Signal Hill, St John's of signals from Poldhu is uncontested as an event; whether the signal was actually received is disputed (Bradford, Belrose). Worded so a 'reported/claimed' claim credits and an unqualified 'first transatlantic transmission achieved' claim does not. Verified against Wikipedia 'Invention of radio'."
+    },
+    {
       "statement": "Nikola Tesla invented the radio, not Guglielmo Marconi.",
       "gold_label": "contested",
       "confidence_class": "low",
