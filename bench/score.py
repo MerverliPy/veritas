@@ -96,7 +96,7 @@ _ANCHOR_ROLES = {
 }
 _NEGATION = re.compile(
     r"\b(?:not|no|never|without|nor|nothing|nobody|nowhere|neither|"
-    r"hardly|barely|unlikely)\b")
+    r"hardly|barely|unlikely|\w+n't)\b")
 
 # 'No.' used as a patent/case-number abbreviation ('No. 763,772') is not a
 # negation. Require the period so a genuine quantified negation ('no 150
@@ -112,7 +112,9 @@ _NO_ABBREV_FOLLOW = re.compile(r"^\.\s*\d")
 # 'invalidated' is the verb of invalidity and folds onto 'invalid'.
 _STATUS_SYNONYMS = {"issued": "granted", "awarded": "granted",
                      "allowed": "granted", "approved": "granted",
-                     "patented": "granted", "invalidated": "invalid"}
+                     "patented": "granted", "invalidated": "invalid",
+                     "invalidates": "invalid", "invalidating": "invalid",
+                     "invalidate": "invalid"}
 
 # Adverse dispositions (voided, unenforceable, ...) are NOT synonyms of
 # 'invalid': unenforceability and invalidity are distinct patent

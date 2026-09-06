@@ -1250,6 +1250,13 @@ def test_d2_radio_priority_claims_never_certified():
     assert gold_verdict("In 1943, the United States Supreme Court canceled "
                         "claim 16 of Marconi's patent 763,772.",
                         expected) != "correct"
+    # contracted negations + base-form 'invalidate' reach the status checks
+    assert gold_verdict("In 1943, the United States Supreme Court held claim "
+                        "16 of Marconi's patent 763,772 wasn't valid or "
+                        "infringed.", expected) != "correct"
+    assert gold_verdict("In 1943, the United States Supreme Court did "
+                        "invalidate claim 16 of Marconi's patent 763,772.",
+                        expected) != "correct"
     # 'No.' patent abbreviation is not a negation (round-8 P2 matcher fix)
     assert gold_verdict("Tesla's patent No. 645,576 for wireless "
                         "transmission was filed in 1897 and granted in "
@@ -1452,6 +1459,9 @@ def test_negation_count_treats_patent_number_abbreviation_as_non_negation():
     assert _negation_count("no copy of the issue survived") == 1
     # a quantified negation is not an abbreviation: no period follows 'no'
     assert _negation_count("affected no 150 countries in May 2017") == 1
+    # contracted negations count (round 17)
+    assert _negation_count("claim 16 wasn't valid") == 1
+    assert _negation_count("the claims weren't infringed") == 1
 
 
 def test_status_antonym_and_synonym_matching():
@@ -1464,6 +1474,8 @@ def test_status_antonym_and_synonym_matching():
     assert _antonym_conflict("claims 10 and 11 are invalid",
                              "claims 10 and 11 are valid")
     assert _antonym_conflict("the Court invalidated claim 16",
+                             "claim 16 was valid and infringed")
+    assert _antonym_conflict("the Court did invalidate claim 16",
                              "claim 16 was valid and infringed")
     assert _antonym_conflict("held claim 16 unenforceable",
                              "claim 16 was valid and infringed")
