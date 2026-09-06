@@ -1319,6 +1319,17 @@ def test_d2_radio_priority_claims_never_certified():
                         "16 of Marconi's patent number 763,772 valid but "
                         "noninfringed, while claims 10 and 11 were invalid.",
                         expected) != "correct"
+    # round 24: passive recipients, 'alongside', owner-bound chronology
+    assert gold_verdict("The 1909 Nobel Prize in Physics was awarded to "
+                        "Guglielmo Marconi and Karl Ferdinand Braun.",
+                        expected) == "correct"
+    assert gold_verdict("Guglielmo Marconi shared the 1909 Nobel Prize in "
+                        "Physics alongside Oliver Lodge.",
+                        expected) != "correct"
+    assert gold_verdict("In 1943 the Supreme Court held Marconi's claims 10 "
+                        "and 11 invalid because Stone's earlier patent "
+                        "predated Marconi's later patent.",
+                        expected) == "correct"
     # 'No.' patent abbreviation is not a negation (round-8 P2 matcher fix)
     assert gold_verdict("Tesla's patent No. 645,576 for wireless "
                         "transmission was filed in 1897 and granted in "

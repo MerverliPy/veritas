@@ -139,38 +139,54 @@ _CONFLICTING_STATUSES = (("granted", "rejected"), ("valid", "invalid"),
 
 _STATUS_TERMS.update({w: "void" for w in _VOID_STATUSES})
 
-# Prior-art chronology ('Stone's earlier patent' vs 'Stone's later
-# patent(s)', including postposed 'the patent, which was later than
-# Marconi's') is truth-critical only when the term modifies 'patent'.
-# 'earlier'/'later' in unrelated prose ('the Court later held', 'later
-# found ... anticipated') must not attach, so the checks are
-# relation-shaped: adjective adjacency ('X patent[s]') and a postposed
-# clause where the patent is the subject of was/were/is/are/filed/came/
-# been/issued + earlier/later.
-_PREPOSED_CHRONO = re.compile(r"\b(earlier|later)\s+patents?\b")
+# Prior-art chronology is truth-critical only when the term modifies a
+# patent, and each sign is bound to the patent's OWNER: 'Stone's earlier
+# patent' vs 'Stone's later patent' conflict, but an accurate comparison
+# like "Stone's earlier patent predated Marconi's later patent" must not
+# (the 'later' belongs to Marconi's patent, a different patent). 'the
+# Court later held ...' attaches no sign.
+_PREPOSED_CHRONO = re.compile(
+    r"\b([A-Za-z]+)'s\s+(earlier|later)\s+patents?\b")
+_PREPOSED_NOOWNER = re.compile(r"\b(earlier|later)\s+patents?\b")
 _POSTPOSED_CHRONO = re.compile(
-    r"\bpatents?\b[^.]{0,60}?\b(?:was|were|is|are|filed|came|been|issued)"
+    r"\b([A-Za-z]+)'s\s+patents?\b[^.]{0,60}?\b"
+    r"(?:was|were|is|are|filed|came|been|issued)"
     r"\s+(?:much\s+|somewhat\s+|slightly\s+|even\s+)?(earlier|later)\b")
 
 
-def _chrono_signs(text: str) -> frozenset[str]:
-    """Which chronology sign (earlier/later) is attached to a patent in
-    ``text``? Only relation-shaped occurrences count: an adjective directly
-    before 'patent(s)' or a postposed 'patent ... was later/filed later'
-    clause. 'the Court later held/found ...' attaches nothing."""
+def _chrono_pairs(text: str) -> frozenset[tuple[str | None, str]]:
+    """(owner, sign) pairs for patents whose chronology is asserted in
+    ``text`` ('Stone's earlier patent' -> ('stone', 'earlier'); 'an earlier
+    patent' with no owner -> (None, 'earlier'))."""
     low = text.lower()
-    signs = {m.group(1) for m in _PREPOSED_CHRONO.finditer(low)}
-    signs |= {m.group(1) for m in _POSTPOSED_CHRONO.finditer(low)}
-    return frozenset(signs)
+    pairs: set[tuple[str | None, str]] = set()
+    for m in _PREPOSED_CHRONO.finditer(low):
+        pairs.add((m.group(1).rstrip("'s"), m.group(2)))
+    for m in _POSTPOSED_CHRONO.finditer(low):
+        pairs.add((m.group(1).rstrip("'s"), m.group(2)))
+    # ownerless preposed signs ('an earlier patent', 'the later patents')
+    # still assert a patent's chronology unless an owner-form already
+    # covered that same occurrence.
+    for m in _PREPOSED_NOOWNER.finditer(low):
+        seg = low[max(0, m.start() - 12):m.end()]
+        if not re.search(r"[a-z]+'s\s+", seg):
+            pairs.add((None, m.group(1)))
+    return frozenset(pairs)
 
 
 def _chronology_conflict(statement: str, gold: str) -> bool:
-    """True when one statement dates the prior-art patent earlier and the
-    other dates it later ('anticipated by an earlier patent' must never
-    match a claim that the patent came later, in either word order)."""
-    sa, sb = _chrono_signs(statement), _chrono_signs(gold)
-    return (("earlier" in sa and "later" in sb)
-            or ("later" in sa and "earlier" in sb))
+    """True when the same patent is dated earlier in one statement and later
+    in the other ('anticipated by an earlier patent' must never match a
+    claim that that patent came later — in either word order). Signs bound
+    to DIFFERENT owners do not conflict."""
+    sa, sb = _chrono_pairs(statement), _chrono_pairs(gold)
+    for owner_a, sign_a in sa:
+        for owner_b, sign_b in sb:
+            if sign_a == sign_b:
+                continue
+            if owner_a == owner_b or owner_a is None or owner_b is None:
+                return True
+    return False
 
 
 def _negation_count(text: str) -> int:
@@ -305,24 +321,40 @@ _AWARD_PAIR = re.compile(
     r"(?:won|shared|received|were\s+awarded)\b")
 _AWARD_SINGLE = re.compile(
     r"\b(" + _NAME + r")\s+(?:won|shared|received|was\s+awarded)\b")
-_AWARD_WITH = re.compile(r"\bwith\s+(" + _NAME + r")\b")
+_AWARD_WITH = re.compile(
+    r"\b(?:with|alongside)\s+(" + _NAME + r")\b")
 _AWARD_VERB = re.compile(r"\b(?:won|shared|received|awarded)\b")
+_AWARD_TO = re.compile(r"\bawarded\s+to\s+(" + _NAME + r")"
+                       r"(?:\s+and\s+(" + _NAME + r"))?")
+_NON_PERSON = {"physics", "nobel", "prize", "chemistry", "medal",
+               "award", "recognition", "development", "wireless",
+               "telegraphy"}
 
 
 def _claim_winners(text: str) -> set[str]:
     """Surnames of people a claim names as award winners/recipients (via an
-    'X and Y won/shared/received' structure, a single 'X won/received', or
-    'shared ... with X'). Empty when the claim names no award winner."""
+    'X and Y won/shared/received' structure, passive 'awarded to X (and
+    Y)', a single 'X won/received', or 'shared ... with/alongside X').
+    Empty when the claim names no award winner."""
+    if "awarded to" in text.lower():
+        m = _AWARD_TO.search(text)
+        if m:
+            out = {m.group(1).split()[-1]}
+            if m.group(2):
+                out.add(m.group(2).split()[-1])
+            return out
     m = _AWARD_PAIR.search(text)
     if m:
         return {m.group(1).split()[-1], m.group(2).split()[-1]}
-    m = _AWARD_SINGLE.search(text)
     out: set[str] = set()
-    if m:
+    m = _AWARD_SINGLE.search(text)
+    if m and m.group(1).split()[-1].lower() not in _NON_PERSON:
         out.add(m.group(1).split()[-1])
     if _AWARD_VERB.search(text):
         for w in _AWARD_WITH.finditer(text):
-            out.add(w.group(1).split()[-1])
+            sur = w.group(1).split()[-1]
+            if sur.lower() not in _NON_PERSON:
+                out.add(sur)
     return out
 
 
