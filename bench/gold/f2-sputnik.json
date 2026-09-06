@@ -2,7 +2,7 @@
   "query_id": "f2-sputnik",
   "class": "F",
   "source_landscape": "Textbook-documented (NASA history pages, Wikipedia 'Sputnik 1'): Sputnik 1 launched by the Soviet Union in 1957 (4 October); first artificial satellite to orbit Earth; launched from Baikonur.",
-  "note": "DRAFT 2026-09-05 — facts checked against web sources by agent (NASA history, Wikipedia Sputnik 1). Statements are phrased at the query's granularity (year + country): the unrequested launch day is deliberately not in a gold statement, because a correct 'in 1957' answer would otherwise be mis-scored as contradicting a gold claim that cites both day and year. OWNER MUST AUDIT before pilot numbers are meaningful.",
+  "note": "AUDITED 2026-09-06 — re-verified against NASA history (Sputnik launched 4 October 1957 by the Soviet Union) and Wikipedia 'Sputnik 1' (Baikonur Cosmodrome). Statements are phrased at the query's granularity (year + country): the unrequested launch day is deliberately not in a gold statement, because a correct 'in 1957' answer would otherwise be mis-scored as contradicting a gold claim that cites both day and year.",
   "expected_claims": [
     {
       "statement": "Sputnik 1 was launched by the Soviet Union in 1957.",

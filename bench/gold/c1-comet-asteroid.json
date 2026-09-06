@@ -2,7 +2,7 @@
   "query_id": "c1-comet-asteroid",
   "class": "C",
   "source_landscape": "Standard astronomy reference material (encyclopedic, stable): comets are ice-and-dust bodies that develop a coma and tails near the Sun; asteroids are rocky/metallic bodies, concentrated in the main belt; both are leftovers from Solar System formation.",
-  "note": "DRAFT 2026-09-05 — facts checked against web sources by agent. Statements are deliberately atomic (one fact each) so ordinary verifier-shaped answers match; compound answers that fuse several facts may under-match and are best stated separately. OWNER MUST AUDIT before pilot numbers are meaningful.",
+  "note": "AUDITED 2026-09-06 — re-verified against standard astronomy references (composition: ice-and-dust vs rocky/metallic bodies; coma and tails develop near the Sun; main-belt concentration between Mars and Jupiter; both are leftovers from Solar System formation; comets on more eccentric orbits). Statements are deliberately atomic (one fact each) so ordinary verifier-shaped answers match; compound answers that fuse several facts may under-match and are best stated separately.",
   "expected_claims": [
     {
       "statement": "Comets consist largely of ice and dust.",

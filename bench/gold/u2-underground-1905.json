@@ -1,14 +1,20 @@
 {
   "query_id": "u2-underground-1905",
   "class": "U",
-  "source_landscape": "Thin on the specific figure. Well documented that London's deep-level tube lines were electric from their opening (City & South London Railway, 1890, the world's first deep-level electric tube) and that sub-surface lines (Metropolitan, District) were electrified around 1905 — but no accessible source states the exact number of steam locomotives still in service on the Underground in 1905. Expect honest low-confidence reporting, not a confident count.",
-  "note": "DRAFT 2026-09-05 — anchor facts checked against web sources by agent (history of the London Underground / electric locomotives). OWNER MUST AUDIT before pilot numbers are meaningful.",
+  "source_landscape": "Thin on the system-wide figure. Well documented that London's deep-level tube lines were electric from their opening (City & South London Railway, 1890, the world's first deep-level electric tube) and that sub-surface lines (Metropolitan, District) were electrified around 1905. The District Railway's own steam fleet IS documented: 54 locomotives were in service in 1905 when the line was electrified, and by 1907 all but six had been sold (Wikipedia 'District Railway steam locomotives', citing Bruce 1983). A report should state which railway it counts rather than fabricate a system-wide 'London Underground in 1905' total.",
+  "note": "AUDITED 2026-09-06 — re-verified against Wikipedia 'City and South London Railway' and 'District Railway steam locomotives' (Bruce 1983); added the documented 54-locomotive-in-1905 anchor. Honest failure is still expected for a system-wide 'London Underground 1905' total, which no accessible source states.",
   "expected_claims": [
     {
       "statement": "The City & South London Railway, opened in 1890, was the world's first deep-level electric tube railway.",
       "gold_label": "correct",
       "confidence_class": "high",
-      "note": "Verified anchor; included for documentation — the 1905 steam-locomotive count is not publicly documented."
+      "note": "Verified anchor (Wikipedia 'City and South London Railway'); included for documentation."
+    },
+    {
+      "statement": "The District Railway had 54 steam locomotives in service in 1905 when the line was electrified.",
+      "gold_label": "correct",
+      "confidence_class": "medium",
+      "note": "Verified anchor (Wikipedia 'District Railway steam locomotives', citing Bruce 1983); single-source stream, so gold expectation is medium."
     }
   ]
 }
