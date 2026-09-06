@@ -55,6 +55,7 @@ _GOLD_LABELS = ("correct", "incorrect", "contested")
 
 def _load_optional_paired(paired_arm: str | None, *, parser=None,
                           require_crosscheck: str | None = None,
+                          require_gold_judge_on: bool | None = None,
                           expected: list[dict] | None = None) \
         -> list[dict] | None:
     """Resolve --paired-arm to the other arm's metric list (A4 same-query
@@ -65,6 +66,7 @@ def _load_optional_paired(paired_arm: str | None, *, parser=None,
     try:
         out = load_paired_metrics(paired_arm,
                                   require_crosscheck=require_crosscheck,
+                                  require_gold_judge_on=require_gold_judge_on,
                                   expected=expected)
     except (ValueError, OSError) as e:
         if parser is not None:
@@ -78,17 +80,29 @@ def _load_optional_paired(paired_arm: str | None, *, parser=None,
 def _load_optional_reruns(rerun_dirs: str | None, *, parser=None,
                           queries: list[dict] | None = None) \
         -> list[list[dict]] | None:
-    """Resolve --rerun-dirs into A6 rerun groups (>=3 same-query ledgers)."""
+    """Resolve --rerun-dirs into A6 rerun groups (>=3 same-query ledgers).
+    Duplicate paths are deduplicated and at least THREE DISTINCT run dirs are
+    required — passing the same run three times must not fabricate reruns."""
     if not rerun_dirs:
         return None
-    dirs = [Path(s) for s in rerun_dirs.split(",") if s.strip()]
+    seen: set[Path] = set()
+    dirs: list[Path] = []
+    for s in rerun_dirs.split(","):
+        if not s.strip():
+            continue
+        p = Path(s).resolve()
+        if p not in seen:
+            seen.add(p)
+            dirs.append(p)
     if len(dirs) < 3 and parser is not None:
-        parser.error("determinism needs at least 3 rerun dirs (--rerun-dirs)")
+        parser.error("determinism needs at least 3 DISTINCT rerun dirs "
+                     "(--rerun-dirs)")
     return collect_rerun_groups(dirs, queries or [])
 
 
 def load_paired_metrics(run_dir: Path, *,
                         require_crosscheck: str | None = None,
+                        require_gold_judge_on: bool | None = None,
                         expected: list[dict] | None = None) -> list[dict]:
     """Load the OTHER arm's per-query metric list from its scorecard for a
     same-query A4 comparison (re-spec A4). Returns the metric dicts of that
@@ -96,9 +110,11 @@ def load_paired_metrics(run_dir: Path, *,
     entry when the scorer predates the query_id field so pairing still works.
 
     Validation (Codex): the paired arm must be the OPPOSITE cross-check arm
-    (``require_crosscheck``), and each paired query's recorded text/class
-    must match the main arm's expected query — pairing unrelated missions or
-    two enabled arms must never produce a gate."""
+    (``require_crosscheck``), scored under the SAME gold-judge mode
+    (``require_gold_judge_on``; judge vs lexical compute precision
+    differently), and each paired query's recorded text/class must match the
+    main arm's expected query — pairing unrelated missions or two enabled
+    arms must never produce a gate."""
     sc = Path(run_dir) / "scorecard.json"
     if not sc.exists():
         raise ValueError(f"paired-arm run has no scorecard.json: {run_dir}")
@@ -109,6 +125,15 @@ def load_paired_metrics(run_dir: Path, *,
         raise ValueError(f"paired-arm run crosscheck is "
                          f"{prov.get('crosscheck')!r}, expected "
                          f"{require_crosscheck!r} (it must be the OTHER arm)")
+    if require_gold_judge_on is not None:
+        gj = prov.get("gold_judge")
+        if gj is None:
+            raise ValueError("paired-arm scorecard records no gold_judge mode; "
+                             "cannot verify scoring-mode parity")
+        if gj.startswith("on") is not require_gold_judge_on:
+            raise ValueError(f"paired-arm gold_judge {gj!r} does not match the "
+                             f"main arm's scoring mode (judge vs lexical "
+                             f"compute precision differently)")
     expected_by_id = {q.get("id"): q for q in (expected or [])
                       if q.get("id")}
     out: list[dict] = []
@@ -546,6 +571,7 @@ def main() -> int:
         paired_metrics = _load_optional_paired(
             args.paired_arm, parser=p,
             require_crosscheck="off" if main_cc else "on",
+            require_gold_judge_on=judge_enabled,
             expected=resolved)
         rerun_groups = _load_optional_reruns(args.rerun_dirs, parser=p,
                                              queries=resolved)
@@ -575,6 +601,7 @@ def main() -> int:
     paired_metrics = _load_optional_paired(
         args.paired_arm, parser=p,
         require_crosscheck="off" if not args.no_crosscheck else "on",
+        require_gold_judge_on=judge_enabled,
         expected=queries)
     rerun_groups = _load_optional_reruns(args.rerun_dirs, parser=p,
                                          queries=queries)

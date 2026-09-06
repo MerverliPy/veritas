@@ -495,9 +495,12 @@ def test_select_queries_reports_unknown_ids():
     assert chosen == [] and unknown == ["nope"]
 
 
-def _write_scorecard(run_dir, entries, *, crosscheck="off"):
+def _write_scorecard(run_dir, entries, *, crosscheck="off",
+                     gold_judge="on"):
     (run_dir / "scorecard.json").write_text(json.dumps(
-        {"provenance": {"crosscheck": crosscheck}, "queries": entries}))
+        {"provenance": {"crosscheck": crosscheck,
+                         "gold_judge": gold_judge},
+         "queries": entries}))
 
 
 def test_load_paired_metrics_injects_query_id(tmp_path):
@@ -517,7 +520,7 @@ def test_load_paired_metrics_injects_query_id(tmp_path):
     expected = [{"id": "f1", "query": "q f1", "class": "F"},
                 {"id": "d1", "query": "q d1", "class": "D"}]
     out = load_paired_metrics(arm, require_crosscheck="off",
-                              expected=expected)
+                              require_gold_judge_on=True, expected=expected)
     assert [m.get("query_id") for m in out] == ["f1", "d1"]
     assert [m.get("class") for m in out] == ["F", "D"]
     with pytest.raises(ValueError):
@@ -525,9 +528,10 @@ def test_load_paired_metrics_injects_query_id(tmp_path):
 
 
 def test_load_paired_metrics_rejects_wrong_arm_or_drift(tmp_path):
-    """Codex: paired metrics must come from the OPPOSITE cross-check arm and
-    match the main arm's query text/class — unrelated missions or two enabled
-    arms must never pair into an A4 gate."""
+    """Codex: paired metrics must come from the OPPOSITE cross-check arm,
+    the SAME gold-judge mode, and match the main arm's query text/class —
+    unrelated missions, mixed scoring modes, or two enabled arms must never
+    pair into an A4 gate."""
     from bench.run_benchmark import load_paired_metrics
     arm = tmp_path / "paired"
     arm.mkdir()
@@ -538,18 +542,23 @@ def test_load_paired_metrics_rejects_wrong_arm_or_drift(tmp_path):
     _write_scorecard(arm, base, crosscheck="on")
     with pytest.raises(ValueError, match="must be the OTHER arm"):
         load_paired_metrics(arm, require_crosscheck="off",
-                            expected=expected)
+                            require_gold_judge_on=True, expected=expected)
+    # scoring-mode mismatch must be rejected (judge vs lexical precision)
+    _write_scorecard(arm, base, crosscheck="off", gold_judge="off(--no-judge)")
+    with pytest.raises(ValueError, match="gold_judge"):
+        load_paired_metrics(arm, require_crosscheck="off",
+                            require_gold_judge_on=True, expected=expected)
     # query text drift must be rejected
     _write_scorecard(arm, base, crosscheck="off")
     drifted = [{"id": "f1", "query": "a DIFFERENT question", "class": "F"}]
     with pytest.raises(ValueError, match="text drifted"):
         load_paired_metrics(arm, require_crosscheck="off",
-                            expected=drifted)
+                            require_gold_judge_on=True, expected=drifted)
     # class drift must be rejected
     cls_drifted = [{"id": "f1", "query": "q f1", "class": "U"}]
     with pytest.raises(ValueError, match="class drifted"):
         load_paired_metrics(arm, require_crosscheck="off",
-                            expected=cls_drifted)
+                            require_gold_judge_on=True, expected=cls_drifted)
     # a query absent from the main arm must be rejected
     extra = [{"id": "zz", "ok": True, "metrics": {"class": "F"},
               "query": "q zz", "class": "F"},
@@ -558,7 +567,7 @@ def test_load_paired_metrics_rejects_wrong_arm_or_drift(tmp_path):
     _write_scorecard(arm, extra, crosscheck="off")
     with pytest.raises(ValueError, match="not in the main"):
         load_paired_metrics(arm, require_crosscheck="off",
-                            expected=expected)
+                            require_gold_judge_on=True, expected=expected)
 
 
 def test_collect_rerun_groups_requires_three_same_query_ledgers(tmp_path):
@@ -607,6 +616,46 @@ def test_collect_rerun_groups_skips_mismatched_query_ledgers(tmp_path):
     queries = [{"id": "f1", "query": "q f1"}]
     groups = collect_rerun_groups(dirs, queries)
     assert len(groups) == 1 and len(groups[0]) == 3     # mismatched one skipped
+
+
+def test_rerun_dirs_deduplicated_before_three_required(tmp_path):
+    """Codex: passing the same rerun dir three times must NOT satisfy the
+    >=3-distinct-runs requirement (three identical pairwise distances are all
+    zero and would fabricate a determinism pass from one actual run)."""
+    import bench.run_benchmark as rb
+    d = tmp_path / "det-1"
+    (d / "f1").mkdir(parents=True)
+    (d / "f1" / "ledger.json").write_text(json.dumps(
+        {"query": "q f1", "claims": [], "confidence_counts": {"high": 1}}))
+    from bench.run_benchmark import _load_optional_reruns
+    with pytest.raises(SystemExit):
+        _load_optional_reruns(f"{d},{d},{d}", parser=__import__(
+            "argparse").ArgumentParser(), queries=[{"id": "f1",
+                                                     "query": "q f1"}])
+    # three genuinely distinct dirs pass the dedupe gate
+    for name in ("det-2", "det-3"):
+        d_other = tmp_path / name
+        (d_other / "f1").mkdir(parents=True)
+        (d_other / "f1" / "ledger.json").write_text(json.dumps(
+            {"query": "q f1", "claims": [], "confidence_counts": {"high": 1}}))
+    groups = _load_optional_reruns(
+        f"{d},{tmp_path / 'det-2'},{tmp_path / 'det-3'}",
+        queries=[{"id": "f1", "query": "q f1"}])
+    assert groups and len(groups[0]) == 3
+
+
+def test_a4_precisionless_paired_set_is_na_not_fail():
+    """Codex P2: a paired set with a D query but no usable F/C precision
+    population on either arm never measured condition (c) — A4 is n/a, never
+    a FAIL on an unevaluated precision condition."""
+    qm = _all_pass_query_metrics()
+    # paired set = U + D only (no F/C): both precision values are None
+    paired = gates([qm[1], qm[2]], q_metrics_nocc=[qm[1], qm[2]])
+    v4 = paired["A4_crosscheck_benefit"]
+    assert v4["ok"] is None
+    assert v4["value"]["n_paired"] == 2
+    assert v4["value"]["precision_with"] is None
+    assert v4["value"]["precision_without"] is None
 
 
 

@@ -682,12 +682,16 @@ def gates(q_metrics: list[dict], *,
         }
         if len(paired_ids) < 2 or not d_paired:
             a4_ok = None  # under-powered / no D query to fire
+        elif pr_with is None or pr_without is None:
+            # Paired set with no usable F/C precision population on either
+            # arm: the precision condition was never measured -> n/a, never a
+            # FAIL on an unevaluated condition (Codex P2).
+            a4_ok = None
         else:
             fires_ok = fires * 2 >= len(d_paired)      # >= half the D queries
             hs_ok = (hs_with is not None and hs_without is not None
                      and hs_with > hs_without)
-            pr_ok = (pr_with is not None and pr_without is not None
-                     and pr_with >= pr_without - 0.05)
+            pr_ok = pr_with >= pr_without - 0.05
             a4_ok = fires_ok and hs_ok and pr_ok
 
     # ---- A5: relevance ----------------------------------------------------
