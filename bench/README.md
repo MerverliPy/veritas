@@ -75,6 +75,15 @@ Each rerun/paired dir holds per-query `out/bench/<run>/<query-id>/ledger.json`
 subdirs (the normal layout). Statement-level `flip_rate` is informational
 under the re-spec; the A6 gate is distribution-level.
 
+Determinism rerun dirs must carry a `scorecard.json` whose `crosscheck` arm
+matches the run being evaluated (cross-check promotes medium->high
+confidence, so a mixed arm would measure configuration drift, not
+determinism). A rerun ledger is usable only when it has a confidence
+distribution OR a plan (claim sub-questions or `no evidence found for:`
+gaps) — an empty ledger never counts toward the >=3 minimum, while a
+claims-less gap-only rerun still contributes to the reported plan-overlap
+Jaccard.
+
 ### Gold/scorer binding (A4 pairing)
 
 Every scorecard records the gold-sheet revision (`gold_rev`) and scorer

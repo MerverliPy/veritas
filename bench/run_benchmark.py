@@ -52,7 +52,9 @@ from bench.score import (  # noqa: E402
     est_cost_usd,
     gates,
     gold_verdict as _lexical_gold,
+    has_usable_distribution,
     load_json,
+    plan_subquestions,
 )
 
 
@@ -110,11 +112,15 @@ def _load_optional_paired(paired_arm: str | None, *, parser=None,
 
 
 def _load_optional_reruns(rerun_dirs: str | None, *, parser=None,
-                          queries: list[dict] | None = None) \
+                          queries: list[dict] | None = None,
+                          require_crosscheck: str | None = None) \
         -> list[list[dict]] | None:
     """Resolve --rerun-dirs into A6 rerun groups (>=3 same-query ledgers).
     Duplicate paths are deduplicated and at least THREE DISTINCT run dirs are
-    required — passing the same run three times must not fabricate reruns."""
+    required — passing the same run three times must not fabricate reruns.
+    ``require_crosscheck`` (the evaluated run's arm) is forwarded to the
+    collector so every rerun dir's scorecard provenance must match it; a
+    mismatch aborts loudly before any paid mission runs."""
     if not rerun_dirs:
         return None
     seen: set[Path] = set()
@@ -129,7 +135,13 @@ def _load_optional_reruns(rerun_dirs: str | None, *, parser=None,
     if len(dirs) < 3 and parser is not None:
         parser.error("determinism needs at least 3 DISTINCT rerun dirs "
                      "(--rerun-dirs)")
-    return collect_rerun_groups(dirs, queries or [])
+    try:
+        return collect_rerun_groups(dirs, queries or [],
+                                    require_crosscheck=require_crosscheck)
+    except ValueError as e:
+        if parser is not None:
+            parser.error(f"rerun dirs rejected: {e}")
+        raise
 
 
 def load_paired_metrics(run_dir: Path, *,
@@ -232,16 +244,50 @@ def load_paired_metrics(run_dir: Path, *,
 
 
 def collect_rerun_groups(run_dirs: list[Path],
-                         queries: list[dict]) -> list[list[dict]]:
+                         queries: list[dict],
+                         require_crosscheck: str | None = None) \
+        -> list[list[dict]]:
     """Collect determinism rerun ledgers (re-spec A6): for every query that
-    has a ledger in >= 3 of ``run_dirs``, group those ledgers. Each returned
-    group is one query's >= 3 same-query reruns, ready for ``gates(
-    rerun_groups=...)``. Fewer than 3 usable reruns -> the query contributes
-    nothing (the gate stays n/a for it).
+    has >= 3 signal-bearing same-query ledgers across ``run_dirs``, group
+    those ledgers. Each returned group is one query's >= 3 same-query
+    reruns, ready for ``gates(rerun_groups=...)``. Fewer than 3 usable
+    reruns -> the query contributes nothing (the gate stays n/a for it).
 
-    Validation (Codex): a rerun ledger whose embedded ``query`` text differs
-    from the expected query is NOT a rerun of that question — it is skipped
-    like a corrupt ledger, so A6 can never pass on mismatched missions."""
+    A ledger is signal-bearing when it carries a usable confidence
+    distribution OR a plan (claim sub-questions or gap-named ones): a
+    gap-only rerun (honest "found nothing" with planned questions) must
+    still count toward plan-overlap, while a completely empty ledger (no
+    claims, no confidence counts, no gaps) contributes nothing and must not
+    satisfy the >=3 minimum (Codex P2).
+
+    When ``require_crosscheck`` is given (the arm of the run being
+    evaluated), every rerun dir must carry a scorecard whose provenance
+    crosscheck matches it — cross-check is precisely what promotes
+    medium->high confidence, so mixing arms would measure configuration
+    drift, not run determinism. Mismatched or unverifiable dirs raise
+    (Codex P1). A rerun ledger whose embedded ``query`` text differs from
+    the expected query is NOT a rerun of that question — it is skipped like
+    a corrupt ledger, so A6 can never pass on mismatched missions."""
+    if require_crosscheck is not None:
+        verified = []
+        for d in run_dirs:
+            sc = Path(d) / "scorecard.json"
+            if not sc.exists():
+                raise ValueError(f"rerun dir has no scorecard.json: {d} — "
+                                 f"cannot verify its crosscheck arm")
+            try:
+                prov = load_json(sc).get("provenance", {})
+            except Exception:  # noqa: BLE001
+                raise ValueError(f"rerun dir scorecard unreadable: {d}") from None
+            cc = prov.get("crosscheck")
+            if cc != require_crosscheck:
+                raise ValueError(
+                    f"rerun dir {d} is the crosscheck-{cc!r} arm but the "
+                    f"evaluated run is crosscheck-{require_crosscheck!r}; "
+                    f"mixing arms measures configuration drift, not "
+                    f"determinism (cross-check promotes medium->high)")
+            verified.append(d)
+        run_dirs = verified
     groups: list[list[dict]] = []
     for q in queries:
         qid = q.get("id")
@@ -259,6 +305,9 @@ def collect_rerun_groups(run_dirs: list[Path],
                 continue       # drop the whole determinism arm
             if qtext and ledger.get("query") and ledger["query"] != qtext:
                 continue      # different mission, not a rerun of this query
+            if not has_usable_distribution(ledger) \
+                    and not plan_subquestions(ledger):
+                continue      # empty ledger contributes nothing (Codex P2)
             ledgers.append(ledger)
         if len(ledgers) >= 3:
             groups.append(ledgers)
@@ -658,12 +707,13 @@ def main() -> int:
             require_gold_judge_on=judge_enabled,
             expected=resolved,
             gold_dir=gold_dir)
-        rerun_groups = _load_optional_reruns(args.rerun_dirs, parser=p,
-                                             queries=resolved)
+        rerun_groups = _load_optional_reruns(
+            args.rerun_dirs, parser=p, queries=resolved,
+            require_crosscheck="off" if nocc_orig else "on")
         if args.rerun_dirs and not rerun_groups:
             p.error("--rerun-dirs produced no usable determinism group: no "
-                    "query has >=3 readable same-query rerun ledgers in the "
-                    "given dirs")
+                    "query has >=3 readable same-query rerun ledgers with a "
+                    "confidence distribution or plan in the given dirs")
         return _rescore_main(run_dir, resolved, gold_dir, judge_enabled,
                              relevance_list, args.no_crosscheck or nocc_orig,
                              args.cap_usd,
@@ -700,11 +750,13 @@ def main() -> int:
         require_gold_judge_on=judge_enabled,
         expected=queries,
         gold_dir=gold_dir)
-    rerun_groups = _load_optional_reruns(args.rerun_dirs, parser=p,
-                                         queries=queries)
+    rerun_groups = _load_optional_reruns(
+        args.rerun_dirs, parser=p, queries=queries,
+        require_crosscheck="off" if args.no_crosscheck else "on")
     if args.rerun_dirs and not rerun_groups:
         p.error("--rerun-dirs produced no usable determinism group: no query "
-                "has >=3 readable same-query rerun ledgers in the given dirs")
+                "has >=3 readable same-query rerun ledgers with a confidence "
+                "distribution or plan in the given dirs")
 
     print(f"[bench] {len(queries)} query(s), cap ${args.cap_usd:.2f}, "
           f"crosscheck={'off' if args.no_crosscheck else 'on'}, "

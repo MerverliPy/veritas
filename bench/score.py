@@ -486,6 +486,26 @@ def _confidence_proportions(ledger: dict) -> dict[str, float] | None:
     return {k: cc.get(k, 0) / total for k in CONFIDENCE_ORDER}
 
 
+def has_usable_distribution(ledger: dict) -> bool:
+    """True when the ledger can contribute to the A6 confidence-distance
+    gate (it carries a usable confidence-count distribution). Claims-less
+    reruns return False — they must never count toward the >=3 rerun
+    minimum that the distribution gate needs."""
+    return _confidence_proportions(ledger) is not None
+
+
+def plan_subquestions(ledger: dict) -> set[str]:
+    """The run's plan as a sub-question set: claim-backed sub-questions plus
+    gap-named ones (a planned sub-question that found no evidence still
+    exists in the plan). Shared by the A3 honest-failure universe, the A6
+    plan-overlap Jaccard, and the rerun-collector's usability test."""
+    named = {c.get("subquestion", "").strip()
+             for c in ledger.get("claims", [])
+             if (c.get("subquestion") or "").strip()}
+    named |= {g for g in _gap_named_subquestions(ledger) if g}
+    return named
+
+
 def normalized_conf_l1(ledger_a: dict, ledger_b: dict) -> float | None:
     """Normalized L1 (total-variation distance) between two reruns'
     confidence-count distributions, in [0, 1] (0 = identical distributions).
@@ -710,22 +730,31 @@ def gates(q_metrics: list[dict], *,
     jac_vals: list[float] = []
     n_groups_ge3 = 0
     for group in rerun_groups or []:
-        # Filter to ledgers with a usable confidence distribution FIRST: a
-        # claims-less rerun would otherwise count toward the three-rerun
-        # minimum while contributing nothing, letting two identical runs pass
-        # A6 on a phantom third rerun (Codex P1).
+        # L1 (the gate) needs >=3 reruns with a usable confidence
+        # distribution. A claims-less rerun has no distribution and must not
+        # count toward that minimum (a phantom third would fabricate a pass).
         usable = [ledger for ledger in group
-                  if _confidence_proportions(ledger) is not None]
-        if len(usable) < 3:
-            continue          # distribution determinism needs >=3 usable reruns
-        n_groups_ge3 += 1
-        for a, b in combinations(usable, 2):
-            d = normalized_conf_l1(a, b)
-            if d is not None:
-                l1_vals.append(d)
-            j = subquestion_jaccard(a, b)
-            if j is not None:
-                jac_vals.append(j)
+                  if has_usable_distribution(ledger)]
+        if len(usable) >= 3:
+            n_groups_ge3 += 1
+            for a, b in combinations(usable, 2):
+                d = normalized_conf_l1(a, b)
+                if d is not None:
+                    l1_vals.append(d)
+        # Plan-overlap Jaccard is a REPORTED diagnostic over >=3 plan-bearing
+        # reruns (the same rerun minimum as the distribution gate). It is
+        # computed over ALL plan-bearing ledgers in the group — including a
+        # claims-less rerun that recorded its planned questions as gaps.
+        # Dropping it (filtering by the confidence distribution first) would
+        # hide a measurable plan-overlap signal whenever a rerun honestly
+        # found no evidence (Codex P2).
+        plan_bearing = [ledger for ledger in group
+                        if plan_subquestions(ledger)]
+        if len(plan_bearing) >= 3:
+            for a, b in combinations(plan_bearing, 2):
+                j = subquestion_jaccard(a, b)
+                if j is not None:
+                    jac_vals.append(j)
     med_l1 = _median(l1_vals) if l1_vals else None
     med_jac = _median(jac_vals) if jac_vals else None
     a6_ok = None

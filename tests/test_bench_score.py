@@ -823,6 +823,88 @@ def test_rerun_dirs_without_usable_groups_fail_preflight(tmp_path):
 
 
 
+def test_rerun_dirs_require_crosscheck_arm_provenance(tmp_path):
+    """Codex P1: rerun dirs must carry a scorecard whose crosscheck arm
+    matches the evaluated run — cross-check promotes medium->high, so mixing
+    arms measures configuration drift, not determinism. Missing or
+    mismatched provenance aborts loudly."""
+    from bench.run_benchmark import _load_optional_reruns
+    import bench.run_benchmark as rb
+
+    def _make(name, crosscheck):
+        d = tmp_path / name
+        (d / "f1").mkdir(parents=True)
+        (d / "f1" / "ledger.json").write_text(json.dumps(
+            {"query": "q f1", "claims": [],
+             "confidence_counts": {"high": 1}}))
+        (d / "scorecard.json").write_text(json.dumps(
+            {"provenance": {"crosscheck": crosscheck}, "queries": []}))
+        return d
+
+    d1, d2, d3 = _make("det-1", "on"), _make("det-2", "on"), _make("det-3", "on")
+    qs = [{"id": "f1", "query": "q f1"}]
+    # all on-arm dirs match an on-arm evaluation
+    groups = _load_optional_reruns(f"{d1},{d2},{d3}", queries=qs,
+                                   require_crosscheck="on")
+    assert groups and len(groups[0]) == 3
+    # a single off-arm dir mixed in aborts loudly (not silently skipped)
+    d4 = _make("det-4", "off")
+    parser = __import__("argparse").ArgumentParser()
+    with pytest.raises(SystemExit):
+        _load_optional_reruns(f"{d1},{d2},{d4}", parser=parser, queries=qs,
+                              require_crosscheck="on")
+    # a dir with no scorecard at all is unverifiable -> abort
+    d5 = tmp_path / "det-5"
+    (d5 / "f1").mkdir(parents=True)
+    (d5 / "f1" / "ledger.json").write_text(json.dumps(
+        {"query": "q f1", "claims": [], "confidence_counts": {"high": 1}}))
+    with pytest.raises(SystemExit):
+        _load_optional_reruns(f"{d1},{d2},{d5}", parser=parser, queries=qs,
+                              require_crosscheck="on")
+
+
+def test_rerun_groups_reject_distribution_less_ledgers(tmp_path):
+    """Codex P2: readable ledgers with NO claims and NO confidence counts are
+    not usable reruns — a group of three such ledgers must not pass
+    preflight (an empty distribution would make A6 n/a after paid missions).
+    Ledgers that carry a plan via gap-names still qualify (plan overlap is
+    measured separately from the distribution gate)."""
+    from bench.run_benchmark import collect_rerun_groups
+    dirs = []
+    for name in ("det-1", "det-2", "det-3"):
+        d = tmp_path / name
+        (d / "f1").mkdir(parents=True)
+        dirs.append(d)
+    # three distribution-less, plan-less ledgers -> no group
+    for d in dirs:
+        (d / "f1" / "ledger.json").write_text(json.dumps(
+            {"query": "q f1", "claims": [], "confidence_counts": {}}))
+    qs = [{"id": "f1", "query": "q f1"}]
+    assert collect_rerun_groups(dirs, qs) == []
+    # same but each records a gap-named plan -> plan-bearing, so a group forms
+    for d in dirs:
+        (d / "f1" / "ledger.json").write_text(json.dumps(
+            {"query": "q f1", "claims": [], "confidence_counts": {},
+             "gaps": ["no evidence found for: q1"]}))
+    groups = collect_rerun_groups(dirs, qs)
+    assert len(groups) == 1 and len(groups[0]) == 3
+
+
+def test_a6_gap_only_rerun_counts_toward_plan_overlap():
+    """Codex P2: a claims-less rerun that recorded its planned questions as
+    gaps still has a plan — it must contribute to the reported plan-overlap
+    Jaccard (computed independently of the confidence-distribution filter),
+    not be silently dropped from the group."""
+    one = _stable_reruns(1)[0][0]          # two claim-bearing reruns
+    gap_only = ledger([], gaps=["no evidence found for: q1"])
+    g = gates(_all_pass_query_metrics(), rerun_groups=[[one, one, gap_only]])
+    # plan overlap is measured over all three plan-bearing ledgers...
+    assert g["A6_determinism"]["value"]["median_pairwise_subq_jaccard"] \
+        is not None
+    # ...while the distribution gate stays n/a (only two usable distributions)
+    assert g["A6_determinism"]["ok"] is None
+
+
 def test_parse_relevance_accepts_binary_only(tmp_path):
     def write(v):
         f = tmp_path / "rel.json"
