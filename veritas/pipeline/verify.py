@@ -68,6 +68,7 @@ def verify_claim(
 
     reason = (data.get("reason") or "").strip()
     better = (data.get("better_statement") or "").strip()
+    _apply_support_flags(claim, data)
 
     claim.verdict = verdict
     claim.note = reason
@@ -86,3 +87,31 @@ def verify_claim(
         if not reason:
             claim.note = "no retrievable evidence supports or refutes this claim"
     return claim
+
+
+def _apply_support_flags(claim: Claim, data: dict) -> None:
+    """Annotate which evidence entries actually support the claim.
+
+    A non-empty ``supporting_sources`` list (1-based indices) marks exactly
+    those entries; every other entry is non-supporting, so a bundled but
+    irrelevant locator can never be used as independent corroboration. When
+    the field is absent, empty or malformed, NO entry is treated as
+    supporting — this holds for every verdict (a partial/contradicted/
+    unsupported claim's evidence must not read as supporting in the ledger
+    either), and the response schema is not enforced on the model so a
+    missing field must never confer support (Codex round-8/9)."""
+    raw = data.get("supporting_sources")
+    if isinstance(raw, list) and raw:
+        idx: set[int] = set()
+        for i in raw:
+            try:
+                i = int(i)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= i <= len(claim.evidence):
+                idx.add(i)
+        for k, ev in enumerate(claim.evidence, start=1):
+            ev.supports = k in idx
+    elif claim.evidence:
+        for ev in claim.evidence:
+            ev.supports = False

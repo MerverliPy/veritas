@@ -30,6 +30,75 @@ def test_supported_maps_to_medium(tmp_path: Path):
     assert c.note == "text agrees"
 
 
+def _two_file_claim(tmp_path: Path) -> Claim:
+    (tmp_path / "a.md").write_text("Widgets process JSON nightly.\n")
+    (tmp_path / "b.md").write_text("Widgets process JSON nightly.\n")
+    evs = [
+        Evidence(source=Source(path="a.md", title="a.md", surface=Surface.LOCAL,
+                               anchor="L1"), passage="Widgets process JSON nightly.",
+                 kind="file"),
+        Evidence(source=Source(path="b.md", title="b.md", surface=Surface.LOCAL,
+                               anchor="L1"), passage="Widgets process JSON nightly.",
+                 kind="file"),
+    ]
+    return Claim(id="c1", statement="Widgets process JSON nightly", evidence=evs)
+
+
+def test_supporting_sources_annotate_evidence(tmp_path: Path):
+    """verify_claim marks exactly the model-named sources as supporting; a
+    bundled-but-irrelevant locator can then never drive a promotion."""
+    llm = FakeLLM({VERIFY_SYSTEM: json.dumps({
+        "verdict": "supported", "reason": "text agrees",
+        "better_statement": "", "supporting_sources": [2]})})
+    provs = build_providers([Surface.LOCAL], local_root=tmp_path)
+    c = _two_file_claim(tmp_path)
+    verify_claim(llm, c, {Surface.LOCAL: provs[0]})
+    assert c.evidence[0].supports is False
+    assert c.evidence[1].supports is True
+
+
+def test_supporting_sources_absent_fails_closed(tmp_path: Path):
+    """A supported verdict with the field absent/malformed confers NO
+    per-locator support (the response schema is not enforced on the model, so
+    a missing field must not enable promotion via a bundled locator)."""
+    llm = FakeLLM({VERIFY_SYSTEM: json.dumps({
+        "verdict": "supported", "reason": "text agrees",
+        "better_statement": ""})})
+    provs = build_providers([Surface.LOCAL], local_root=tmp_path)
+    c = _two_file_claim(tmp_path)
+    verify_claim(llm, c, {Surface.LOCAL: provs[0]})
+    assert c.evidence[0].supports is False
+    assert c.evidence[1].supports is False
+
+
+def test_supporting_sources_empty_marks_none_supporting(tmp_path: Path):
+    """supported verdict naming NO supporting source: no locator may drive a
+    later promotion."""
+    llm = FakeLLM({VERIFY_SYSTEM: json.dumps({
+        "verdict": "supported", "reason": "text agrees",
+        "better_statement": "", "supporting_sources": []})})
+    provs = build_providers([Surface.LOCAL], local_root=tmp_path)
+    c = _two_file_claim(tmp_path)
+    verify_claim(llm, c, {Surface.LOCAL: provs[0]})
+    assert c.evidence[0].supports is False
+    assert c.evidence[1].supports is False
+
+
+def test_nonsupported_verdict_clears_support_flags(tmp_path: Path):
+    """partial/contradicted/unsupported claims must not leave their evidence
+    reading as supporting in the ledger when the field is absent (Codex
+    round-9 P2)."""
+    llm = FakeLLM({VERIFY_SYSTEM: json.dumps({
+        "verdict": "partial", "reason": "says most not all",
+        "better_statement": "most widgets work"})})
+    provs = build_providers([Surface.LOCAL], local_root=tmp_path)
+    c = _two_file_claim(tmp_path)
+    verify_claim(llm, c, {Surface.LOCAL: provs[0]})
+    assert c.verdict is Verdict.PARTIAL
+    assert c.evidence[0].supports is False
+    assert c.evidence[1].supports is False
+
+
 def test_partial_low_with_correction(tmp_path: Path):
     llm = FakeLLM({VERIFY_SYSTEM: json.dumps(
         {"verdict": "partial", "reason": "says most not all",

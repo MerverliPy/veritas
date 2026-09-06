@@ -15,6 +15,7 @@ def scripted_llm(
     claims: str | None = None,
     verdict: str | None = None,
     synth: str | None = None,
+    corroborator: str | None = None,
 ) -> FakeLLM:
     """FakeLLM with sensible JSON defaults; override any stage by passing raw
     JSON strings (verdict may be a user-text callable)."""
@@ -40,4 +41,5 @@ def scripted_llm(
         "verdict": "supported", "reason": "scripted", "better_statement": ""})
     responses["You are Veritas Synthesizer."] = synth or "Scripted answer."
     responses["You are Veritas Conflict Detector."] = json.dumps({"contradicting_pairs": []})
+    responses["You are Veritas Corroborator."] = corroborator or json.dumps({"same_fact_pairs": []})
     return FakeLLM(responses)

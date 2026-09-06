@@ -149,6 +149,13 @@ class Runner:
                     plan.crosscheck_seed_note or "independent angle",
                     subquestion_limit=max(2, self.max_subquestions // 2),
                     evidence_limit=max(4, self.evidence_per_subquestion // 2),
+                    primary_subquestions=[s.text for s in plan.subquestions],
+                    # the asserted claims too: an open-ended request's
+                    # sub-questions alone cannot tell the counter-evidence
+                    # planner which date/number/attribution to challenge
+                    primary_claims=[c.statement for c in verified
+                                    if c.verdict in (Verdict.SUPPORTED,
+                                                     Verdict.PARTIAL)],
                 )
                 self.log("cross-check: corroborated "
                          f"{cross_summary.get('corroborated')} of {primary_before_cross} "
@@ -180,9 +187,16 @@ class Runner:
             try:
                 from .crosscheck import detect_contradictions
                 for i, j in detect_contradictions(self.llm, assertable):
-                    conflicts.append({"a": assertable[i - 1].statement,
-                                      "b": assertable[j - 1].statement,
+                    a, b = assertable[i - 1], assertable[j - 1]
+                    conflicts.append({"a": a.statement,
+                                      "b": b.statement,
                                       "basis": "model-pairing"})
+                    # mirror the pair on the claims themselves: ledger readers
+                    # (and the benchmark D-class metric) see per-claim
+                    # conflicts, not only the report-level list
+                    for x, y in ((a, b), (b, a)):
+                        if y.statement not in x.conflicts:
+                            x.conflicts.append(y.statement)
             except Exception as e:
                 self.log(f"contradiction detection skipped: {type(e).__name__}: {e}")
 

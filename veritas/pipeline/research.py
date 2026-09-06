@@ -55,14 +55,45 @@ def make_plan(llm: BaseLLM, query: Query) -> Plan:
     return plan
 
 
-def make_crosscheck_plan(llm: BaseLLM, query: Query, seed_note: str) -> Plan:
-    """Second, independent decomposition for the cross-check pass."""
+def make_crosscheck_plan(
+    llm: BaseLLM,
+    query: Query,
+    seed_note: str,
+    primary_subquestions: list[str] | None = None,
+    primary_claims: list[str] | None = None,
+) -> Plan:
+    """Second, independent decomposition for the cross-check pass.
+
+    ``primary_subquestions`` (the first pass's own sub-question texts) are
+    shown as factual ground so the independent pass can re-derive the same key
+    facts from different sources (corroboration) and actively probe them for
+    counter-evidence (contradiction) instead of drifting onto a wholly
+    disjoint or counterfactual angle that nothing can corroborate.
+    ``primary_claims`` (the first pass's asserted claim statements) name the
+    concrete assertions the counter-evidence probes should challenge — an
+    open-ended request's sub-questions cannot tell the planner which date,
+    number or attribution is at stake.
+    """
     user = (
         f"Original research request: {query.text}\n"
-        f"Alternative framing to explore: {seed_note}\n"
         f"Surfaces enabled: {', '.join(query.surface_names())}\n"
-        "\nRe-plan from this independent angle."
+        f"Alternative framing to explore: {seed_note}\n"
     )
+    if primary_subquestions:
+        user += (
+            "\nFirst pass sub-questions (factual ground to independently "
+            "re-derive from different sources and probe for counter-evidence):\n"
+            + "\n".join(f"- {s}" for s in primary_subquestions)
+            + "\n"
+        )
+    if primary_claims:
+        user += (
+            "\nFirst pass asserted claims (facts to challenge with "
+            "counter-evidence only where genuinely disputed):\n"
+            + "\n".join(f"- {s}" for s in primary_claims)
+            + "\n"
+        )
+    user += "\nRe-plan from this independent angle."
     data = llm.complete_json(CROSSCHECK_PLANNER_SYSTEM, user)
     return subquestions_from_plan_json(data, query.text)
 
