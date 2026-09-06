@@ -4,14 +4,18 @@ A second, independently-planned research pass runs over the same request
 (different decomposition / angle). Its claims are reconciled with the primary
 run's claims *deterministically*:
 
-* corroboration — a cross-run claim sharing most significant tokens with a
-  primary claim is independent agreement. If the primary is ``supported`` and
-  its cited sources differ from the cross claim's, confidence rises to
-  ``high``. Token matching is conservative by design: a wrong 'agreement' is
-  worse than none.
-* candidates — cross-run claims with no primary counterpart are *candidates*:
-  they are put through the same LLM verifier as primary claims (never trusted
-  unchecked) and appended with a note marking their origin.
+* corroboration — every cross-run claim is put through the same LLM
+  verifier as primary claims FIRST (never trusted unchecked). A verified
+  cross-run claim sharing most significant tokens with a primary claim is
+  independent agreement: if the primary is ``supported`` and the agreeing
+  claim cites a genuinely new source, confidence rises to ``high`` and that
+  source's evidence is adopted onto the primary. Unverified echoes never
+  corroborate. Token matching is conservative by design: a wrong
+  'agreement' is worse than none.
+* candidates — cross-run claims with no primary counterpart are
+  *candidates*: verified like every other cross claim, then appended with a
+  note marking their origin (unless a later semantic pass consumes them as
+  corroboration).
 * conflicts — semantic contradictions are detected by ONE dedicated LLM pass
   over the final assertable claims (``detect_contradictions``). The model
   proposes index pairs only; the module validates indices against the real
@@ -102,20 +106,23 @@ def run_crosscheck(
         cross_claims.extend(claims)
         gaps.extend(g)
 
+    # EVERY cross claim is verified BEFORE reconciliation: reconcile's
+    # lexical corroboration (crosschecked flag + a possible promotion to
+    # high) may only rest on a donor that passed verify_claim — an unverified
+    # echo must never drive confidence (Codex round-4 P1).
+    provider_by_surface = {p.surface: p for p in providers}
+    for xc in cross_claims:
+        try:
+            verify_claim(llm, xc, provider_by_surface)
+        except Exception:
+            xc.verdict = Verdict.UNSUPPORTED
+            xc.confidence = "unsupported"
+        origin = xc.note
+        xc.note = (origin + " " if origin else "") + \
+            "(from the independent cross-check pass)"
+
     summary = reconcile(primary, cross_claims, plan.overview, gaps)
     candidates: list[Claim] = summary.pop("candidates", [])
-
-    # candidates get the same verification treatment as primary claims
-    provider_by_surface = {p.surface: p for p in providers}
-    for cand in candidates:
-        try:
-            verify_claim(llm, cand, provider_by_surface)
-        except Exception:
-            cand.verdict = Verdict.UNSUPPORTED
-            cand.confidence = "unsupported"
-        origin = cand.note
-        cand.note = (origin + " " if origin else "") + \
-            "(from the independent cross-check pass)"
 
     # Semantic corroboration: a VERIFIED-supported independent claim may
     # corroborate a primary claim whose paraphrase the token matcher missed.
@@ -125,12 +132,13 @@ def run_crosscheck(
     # as new candidates.
     eligible_cross = [c for c in candidates
                       if c.verdict is Verdict.SUPPORTED]
-    # a primary the lexical pass already crosschecked (same-source match) is
-    # still eligible: a later verified paraphrase from a genuinely new source
-    # should promote it, not be appended as a duplicate (Codex P2)
+    # ALL supported primaries are eligible (any confidence): a claim already
+    # promoted high by a lexical match must still consume a later verified
+    # paraphrase of the same fact (adopt its evidence) instead of letting it
+    # be appended as a duplicate; promotion itself stays medium-only inside
+    # corroborate_from_semantic (Codex round-4 P2).
     eligible_primary = [c for c in original_primary
-                        if c.verdict is Verdict.SUPPORTED
-                        and c.confidence == "medium"]
+                        if c.verdict is Verdict.SUPPORTED]
     sem_flags, sem_promos, sem_pairs = corroborate_from_semantic(
         llm, eligible_primary, eligible_cross)
     consumed = {id(xc) for _pc, xc in sem_pairs}
@@ -169,7 +177,13 @@ def reconcile(
     cross_overview: str = "",
     cross_gaps: list[str] | None = None,
 ) -> dict:
-    """Deterministic corroboration + candidate selection. See module doc."""
+    """Deterministic corroboration + candidate selection. See module doc.
+
+    ``cross`` claims must already have passed ``verify_claim``: only a
+    verified-SUPPORTED lexical match may set ``crosschecked`` or promote to
+    ``high`` (its new-source evidence is then adopted onto the primary).
+    Non-matching claims become ``candidates`` for the semantic pass and the
+    appended-claims list."""
     matched_primary: set[str] = set()
     candidates: list[Claim] = []
     for xc in cross:
@@ -186,6 +200,12 @@ def reconcile(
                 best = (sim, pc)
         sim, pc = best
         if pc is not None and sim >= 0.5:
+            # only a VERIFIED-SUPPORTED donor may corroborate: a lexical echo
+            # that failed verification (unsupported/contradicted) is consumed
+            # without marking the primary — it must never set crosschecked or
+            # drive a high promotion (Codex round-4 P1)
+            if xc.verdict is not Verdict.SUPPORTED:
+                continue
             matched_primary.add(pc.id)
             pc.crosschecked = True
             if pc.verdict is Verdict.SUPPORTED and pc.confidence == "medium":
@@ -195,11 +215,10 @@ def reconcile(
                 # cross {A} is subset agreement, not independent evidence
                 if pc_locs and (xc_locs - pc_locs):
                     pc.confidence = "high"
-            # NOTE: matched cross claims reach reconcile straight from
-            # extraction — UNVERIFIED — so their evidence is never merged
-            # into the verified primary here (Codex P1: adopt evidence only
-            # from verified-supported donors; that is the semantic pass's
-            # job, where donors passed verify_claim first).
+            # donor passed verify_claim as supported, so its new-source
+            # evidence is adopted — the promoted claim keeps the independent
+            # source that justified it in the report/ledger
+            _adopt_evidence(pc, xc)
         else:
             candidates.append(xc)
 

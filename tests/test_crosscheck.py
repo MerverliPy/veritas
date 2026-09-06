@@ -77,10 +77,10 @@ def test_reconcile_subset_sources_do_not_promote():
     assert pc.crosschecked is True
 
 
-def test_reconcile_promotes_without_adopting_unverified_evidence():
-    """Deterministic matches reach reconcile straight from extraction —
-    unverified — so their evidence is NOT merged into the verified primary;
-    only the semantic pass adopts (its donors passed verify_claim)."""
+def test_reconcile_promotion_adopts_verified_evidence():
+    """A matched donor that passed verification as supported may drive the
+    promotion; its new-source evidence is adopted onto the primary so the
+    report/ledger keep the independent source (Codex P1)."""
     pc = claim("Veritas ships a nightly JSON batch process", "https://a.example/x")
     xc = claim("Veritas ships a nightly JSON batch process regularly",
                "https://b.example/y", cid="x1")
@@ -88,7 +88,23 @@ def test_reconcile_promotes_without_adopting_unverified_evidence():
     assert result["corroborated"] == 1
     assert pc.confidence == "high"
     assert result["candidates"] == []
-    assert {e.source.locator() for e in pc.evidence} == {"https://a.example/x"}
+    assert {e.source.locator() for e in pc.evidence} == {
+        "https://a.example/x", "https://b.example/y"}
+
+
+def test_reconcile_unsupported_lexical_echo_never_corroborates():
+    """Only verified-SUPPORTED donors corroborate: a token-identical echo
+    that failed verification (still default UNSUPPORTED) is consumed without
+    marking the primary crosschecked or promoting it (Codex round-4 P1)."""
+    pc = claim("The release happened in March 2025", "https://a.example/x")
+    xc = Claim(id="x1", statement="The release happened in March 2025",
+               evidence=[ev("https://b.example/y")],
+               verdict=Verdict.UNSUPPORTED, confidence="unsupported")
+    result = reconcile([pc], [xc])
+    assert result["corroborated"] == 0
+    assert pc.crosschecked is False
+    assert pc.confidence == "medium"
+    assert xc not in result["candidates"]  # consumed, no corroboration
 
 
 def test_unmatched_cross_claim_becomes_candidate_not_auto_claim():
