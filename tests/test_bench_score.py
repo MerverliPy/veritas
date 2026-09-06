@@ -1181,6 +1181,20 @@ def test_d2_radio_priority_claims_never_certified():
                         "Physics with Nikola Tesla in recognition of their "
                         "contributions to the development of wireless "
                         "telegraphy.", expected) == "incorrect"
+    # concise wrong-holder / wrong-co-recipient forms (round-8 P2s)
+    assert gold_verdict("Marconi's patent 645,576 for wireless transmission "
+                        "was filed in 1897 and granted in 1900.",
+                        expected) == "incorrect"
+    assert gold_verdict("Marconi and Tesla won the 1909 Nobel Prize in "
+                        "Physics for wireless telegraphy.",
+                        expected) == "incorrect"
+    # 'No.' patent abbreviation is not a negation (round-8 P2 matcher fix)
+    assert gold_verdict("Tesla's patent No. 645,576 for wireless "
+                        "transmission was filed in 1897 and granted in "
+                        "1900.", expected) == "correct"
+    assert gold_verdict("Tesla's patent No. 645,576 for wireless "
+                        "transmission was filed in 1897 and rejected in "
+                        "1900.", expected) == "incorrect"
     # the 'Court declared Tesla the inventor' overclaim must never win credit
     assert gold_verdict("In 1943 the United States Supreme Court declared "
                         "Nikola Tesla the inventor of radio.",
@@ -1362,3 +1376,15 @@ def test_conflicting_month_names_rejected():
     # omitting the month entirely still matches
     assert gold_verdict("The Shadow Brokers released EternalBlue in 2017.",
                         expected) == "correct"
+
+
+def test_negation_count_treats_patent_number_abbreviation_as_non_negation():
+    """'patent No. 763,772' spells a number, not a negation: polarity
+    matching must not reject otherwise-verbatim claims that use the
+    conventional abbreviation, while real negations keep counting."""
+    from bench.score import _negation_count
+    assert _negation_count("patent No. 763,772 was granted in 1900") == 0
+    assert _negation_count("patent no. 763,772") == 0
+    assert _negation_count("no evidence was found") == 1
+    assert _negation_count("did not spread without user interaction") == 2
+    assert _negation_count("no copy of the issue survived") == 1

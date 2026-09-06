@@ -98,11 +98,23 @@ _NEGATION = re.compile(
     r"\b(?:not|no|never|without|nor|nothing|nobody|nowhere|neither|"
     r"hardly|barely|unlikely)\b")
 
+# 'No.'/'no' used as a patent/case-number abbreviation ('No. 763,772') is
+# not a negation: it precedes a digit, optionally via a period.
+_NO_ABBREV_FOLLOW = re.compile(r"^\s*(?:\.\s*)?\d")
+
 
 def _negation_count(text: str) -> int:
     """Number of negation markers. Double negation ('did not spread without
-    requiring...') must not collapse to the same polarity as a single 'without'."""
-    return len(_NEGATION.findall(text.lower()))
+    requiring...') must not collapse to the same polarity as a single
+    'without'. A leading 'no' that is a number abbreviation ('patent
+    No. 763,772') is not counted — otherwise otherwise-verbatim claims that
+    spell the patent number conventionally are polarity-rejected."""
+    count = 0
+    for m in _NEGATION.finditer(text.lower()):
+        if m.group(0) == "no" and _NO_ABBREV_FOLLOW.match(text[m.end():]):
+            continue  # number abbreviation, not a negation
+        count += 1
+    return count
 
 
 def _quantities(text: str) -> set[str]:

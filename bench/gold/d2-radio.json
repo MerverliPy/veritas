@@ -17,6 +17,12 @@
       "note": "Patent 645,576 belonged to Nikola Tesla, not Marconi — a plausible conflation in a Marconi-versus-Tesla report. Verbatim claims match this entry at higher similarity than the correct Tesla anchor, so the mis-assignment cannot ride its tokens to credit."
     },
     {
+      "statement": "Marconi's patent 645,576 for wireless transmission was filed in 1897 and granted in 1900.",
+      "gold_label": "incorrect",
+      "confidence_class": "unsupported",
+      "note": "Concise form of the wrong-holder falsehood (the patent was Tesla's), so the natural concise mis-assignment outranks the verbose guard above it and cannot match the concise Tesla variant for credit."
+    },
+    {
       "statement": "Tesla's patent 645,576 for wireless transmission was filed in 1897 and granted in 1900.",
       "variant_of": "In 1900 the United States Patent Office granted Nikola Tesla patent number 645,576 for a wireless transmission system, on an application filed on 2 September 1897.",
       "gold_label": "correct",
@@ -46,6 +52,12 @@
       "gold_label": "incorrect",
       "confidence_class": "unsupported",
       "note": "The 1909 Physics prize was shared with Karl Ferdinand Braun, not Nikola Tesla — a plausible conflation in a Marconi-versus-Tesla report. Verbatim claims match this entry at higher similarity than the correct Braun anchor, so the wrong co-recipient cannot ride its tokens to credit."
+    },
+    {
+      "statement": "Marconi and Tesla shared the 1909 Nobel Prize in Physics.",
+      "gold_label": "incorrect",
+      "confidence_class": "unsupported",
+      "note": "Concise form of the wrong-co-recipient falsehood (the Physics prize was shared with Braun, not Tesla). Wording deliberately carries no 'wireless/telegraphy' tokens so a true concise Marconi-only claim stays below the match bar while an 'X and Y shared/won' claim matches this entry above the correct concise variant."
     },
     {
       "statement": "Guglielmo Marconi received the 1909 Nobel Prize in Physics in recognition of his contributions to wireless telegraphy.",
