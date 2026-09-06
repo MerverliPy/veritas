@@ -1145,6 +1145,14 @@ def test_d2_radio_priority_claims_never_certified():
                         "11 of Marconi's patent 763,772 invalid as "
                         "anticipated by John Stone Stone's earlier patent.",
                         expected) == "correct"
+    # Marconi-side factual anchor + concise phrasing (round-4 P2)
+    assert gold_verdict("Guglielmo Marconi shared the 1909 Nobel Prize in "
+                        "Physics with Karl Ferdinand Braun in recognition of "
+                        "their contributions to the development of wireless "
+                        "telegraphy.", expected) == "correct"
+    assert gold_verdict("Marconi won the 1909 Nobel Prize in Physics for "
+                        "his work developing wireless telegraphy.",
+                        expected) == "correct"
     # the 'Court declared Tesla the inventor' overclaim must never win credit
     assert gold_verdict("In 1943 the United States Supreme Court declared "
                         "Nikola Tesla the inventor of radio.",
