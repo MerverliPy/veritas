@@ -107,6 +107,60 @@ def test_reconcile_unsupported_lexical_echo_never_corroborates():
     assert xc not in result["candidates"]  # consumed, no corroboration
 
 
+def test_reconcile_opposite_polarity_never_corroborates():
+    """'released in March' vs 'NOT released in March' share every significant
+    token ('not' is a stopword), so a verified negation must be surfaced as a
+    candidate for the conflict detector — never consumed as agreement or
+    promoted (Codex round-6 P1)."""
+    pc = claim("Version 2.0 was released in March 2025", "https://a.example/x")
+    xc = claim("Version 2.0 was not released in March 2025",
+               "https://b.example/y", cid="x1")
+    result = reconcile([pc], [xc])
+    assert result["corroborated"] == 0
+    assert pc.crosschecked is False
+    assert pc.confidence == "medium"
+    assert xc in result["candidates"]  # reaches detect_contradictions later
+
+
+def test_reconcile_no_promotion_on_bundled_unsupporting_locator():
+    """A cross claim verified on the SHARED source alone (its bundled new
+    locator B was NOT found supporting) must not promote the primary via B,
+    and B's evidence is not adopted (Codex round-6 P1)."""
+    pc = claim("Widgets process JSON nightly", "https://a.example/x")
+    xc = Claim(
+        id="x1", statement="Widgets process JSON nightly",
+        evidence=[ev("https://a.example/x"),
+                  Evidence(source=Source(url="https://b.example/y",
+                                         title="b"), passage="p",
+                           supports=False)],
+        verdict=Verdict.SUPPORTED, confidence="medium")
+    result = reconcile([pc], [xc])
+    assert result["corroborated"] == 1   # agreement on the shared fact
+    assert pc.crosschecked is True
+    assert pc.confidence == "medium"       # B did not support -> stays medium
+    assert {e.source.locator() for e in pc.evidence} == {"https://a.example/x"}
+
+
+def test_semantic_no_promotion_on_unsupporting_new_locator():
+    """Semantic mirror: a matched donor whose only new locator was not found
+    supporting by the verifier must not promote the primary (Codex round-6
+    P1)."""
+    llm = FakeLLM({CORROBORATOR_SYSTEM: json.dumps(
+        {"same_fact_pairs": [[1, 1]]})})
+    pc = claim("Sputnik was launched on 4 Oct 1957", "https://nasa.example/x")
+    xc = Claim(
+        id="x1", statement="The USSR orbited Sputnik in October 1957",
+        evidence=[Evidence(source=Source(url="https://esa.example/y",
+                                         title="esa"), passage="p",
+                           supports=False)],
+        verdict=Verdict.SUPPORTED, confidence="medium")
+    flags, promos, _ = corroborate_from_semantic(llm, [pc], [xc])
+    assert (flags, promos) == (1, 0)
+    assert pc.crosschecked is True
+    assert pc.confidence == "medium"
+    assert {e.source.locator() for e in pc.evidence} == {"https://nasa.example/x"}
+
+
 def test_unmatched_cross_claim_becomes_candidate_not_auto_claim():
     pc = claim("Widgets process JSON", "https://a.example/x")
     xc = claim("Llamas are vegetarian herd animals", "https://b.example/y", cid="x1")

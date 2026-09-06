@@ -68,6 +68,7 @@ def verify_claim(
 
     reason = (data.get("reason") or "").strip()
     better = (data.get("better_statement") or "").strip()
+    _apply_support_flags(claim, data, verdict)
 
     claim.verdict = verdict
     claim.note = reason
@@ -86,3 +87,33 @@ def verify_claim(
         if not reason:
             claim.note = "no retrievable evidence supports or refutes this claim"
     return claim
+
+
+def _apply_support_flags(claim: Claim, data: dict, verdict: Verdict) -> None:
+    """Annotate which evidence entries actually support the claim.
+
+    The verifier names ``supporting_sources`` (1-based indices into the cited
+    sources); every other entry is marked non-supporting so a bundled but
+    irrelevant locator can never be used as independent corroboration. When
+    the model omits the field (hermetic scripts, older prompts) all entries
+    stay defaulted to supporting — claim-level semantics unchanged."""
+    raw = data.get("supporting_sources")
+    if not isinstance(raw, list):
+        return
+    if not raw:
+        # supported verdict naming NO supporting source: nothing verified as
+        # backing, so no locator may drive a promotion
+        if verdict is Verdict.SUPPORTED and claim.evidence:
+            for ev in claim.evidence:
+                ev.supports = False
+        return
+    idx: set[int] = set()
+    for i in raw:
+        try:
+            i = int(i)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= i <= len(claim.evidence):
+            idx.add(i)
+    for k, ev in enumerate(claim.evidence, start=1):
+        ev.supports = k in idx

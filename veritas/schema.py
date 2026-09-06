@@ -72,10 +72,15 @@ class Evidence:
     passage: str  # quoted snippet, ideally verbatim from the source
     retrieved_at: float = field(default_factory=time.time)
     kind: str = "search"  # search | fetch | file
+    # set by verification: does this evidence entry actually support the
+    # claim as stated? Defaults True (all cited sources treated as backing)
+    # until verify_claim annotates a subset from the model's judgement.
+    supports: bool = True
 
     def to_dict(self) -> dict:
         return {"source": self.source.to_dict(), "passage": self.passage,
-                "retrieved_at": self.retrieved_at, "kind": self.kind}
+                "retrieved_at": self.retrieved_at, "kind": self.kind,
+                "supports": self.supports}
 
     @staticmethod
     def from_dict(d: dict) -> "Evidence":
@@ -84,6 +89,7 @@ class Evidence:
             passage=d["passage"],
             retrieved_at=d.get("retrieved_at", 0.0),
             kind=d.get("kind", "search"),
+            supports=d.get("supports", True),
         )
 
 

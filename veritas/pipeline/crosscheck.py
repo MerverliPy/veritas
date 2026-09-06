@@ -47,6 +47,18 @@ def _sig_tokens(statement: str) -> set[str]:
     return set(re.findall(r"[a-z0-9_]{4,}", statement.lower()))
 
 
+# strong negation cues: a claim carrying one of these on ONE side of a
+# lexical match is asserting the OPPOSITE fact, never corroborating it
+_NEG_RE = re.compile(
+    r"\b(?:not|never|nothing|nobody|none|neither|nor|without|cannot|"
+    r"won['’]t|don['’]t|doesn['’]t|didn['’]t|isn['’]t|aren['’]t|"
+    r"wasn['’]t|weren['’]t|hasn['’]t|haven['’]t|hadn['’]t|no one)\b")
+
+
+def _has_negation(statement: str) -> bool:
+    return bool(_NEG_RE.search(statement.lower()))
+
+
 def _jaccard(a: set, b: set) -> float:
     if not a or not b:
         return 0.0
@@ -54,16 +66,18 @@ def _jaccard(a: set, b: set) -> float:
 
 
 def _adopt_evidence(target: Claim, donor: Claim) -> None:
-    """Merge the donor claim's evidence onto the target, keeping only the
-    first entry per source locator. Call only with VERIFIED-supported donors
-    (reconcile and the semantic pass run after verify_claim): a consumed
-    corroborating claim's evidence must stay on the claim it promoted rather
-    than vanish with the dropped claim (Codex P1). Fresh evidence is
-    PREPENDED so the independent corroborating source lands inside
-    render_report's first-N evidence window instead of after it (Codex P2)."""
+    """Merge the donor's SUPPORTING evidence onto the target, keeping only
+    the first entry per source locator. Call only with VERIFIED-supported
+    donors (reconcile and the semantic pass run after verify_claim): a
+    consumed corroborating claim's evidence must stay on the claim it
+    promoted rather than vanish with the dropped claim (Codex P1), and an
+    evidence entry the verifier did not find supporting is never adopted
+    (Codex round-6 P1). Fresh evidence is PREPENDED so the independent
+    corroborating source lands inside render_report's first-N evidence
+    window instead of after it (Codex P2)."""
     have = {e.source.locator() for e in target.evidence}
     fresh = [e for e in donor.evidence
-             if e.source.locator() not in have]
+             if e.supports and e.source.locator() not in have]
     if fresh:
         target.evidence[0:0] = fresh
 
@@ -208,11 +222,24 @@ def reconcile(
             # drive a high promotion (Codex round-4 P1)
             if xc.verdict is not Verdict.SUPPORTED:
                 continue
+            # polarity check: "released in March" vs "NOT released in March"
+            # share every significant token ('not' is a stopword) — agreement
+            # would consume a verified negation and hide the contradiction.
+            # Opposite polarity on a lexical match goes to the candidates so
+            # both sides reach detect_contradictions (Codex round-6 P1).
+            if _has_negation(pc.statement) != _has_negation(xc.statement):
+                candidates.append(xc)
+                continue
             matched_primary.add(pc.id)
             pc.crosschecked = True
             if pc.verdict is Verdict.SUPPORTED and pc.confidence == "medium":
                 pc_locs = {e.source.locator() for e in pc.evidence}
-                xc_locs = {e.source.locator() for e in xc.evidence}
+                # only locators the verifier found SUPPORTING may promote:
+                # a bundled-but-irrelevant new locator (verify supported on
+                # the shared source alone) must not drive high (Codex round-6
+                # P1); _adopt_evidence applies the same filter
+                xc_locs = {e.source.locator() for e in xc.evidence
+                           if e.supports}
                 # promotion needs a genuinely NEW locator: primary {A,B} vs
                 # cross {A} is subset agreement, not independent evidence
                 if pc_locs and (xc_locs - pc_locs):
@@ -310,11 +337,14 @@ def corroborate_from_semantic(
     for pc, xc in pairs:
         corroborated.add(id(pc))
         pc.crosschecked = True
+        pc_locs = {e.source.locator() for e in pc.evidence}
+        # only locators the verifier found SUPPORTING may promote: a bundled
+        # but irrelevant new locator (claim verified on the shared source
+        # alone) must not drive high (Codex round-6 P1)
+        xc_locs = {e.source.locator() for e in xc.evidence if e.supports}
         if (pc.verdict is Verdict.SUPPORTED
                 and pc.confidence == "medium"
-                and {e.source.locator() for e in pc.evidence}
-                and ({e.source.locator() for e in xc.evidence}
-                     - {e.source.locator() for e in pc.evidence})):
+                and pc_locs and (xc_locs - pc_locs)):
             pc.confidence = "high"
             promoted.add(id(pc))
         _adopt_evidence(pc, xc)
