@@ -1290,6 +1290,14 @@ def test_d2_radio_priority_claims_never_certified():
                         "by Stone's later patents.", expected) != "correct"
     assert gold_verdict("The Supreme Court held claim 16 of Marconi patent "
                         "763,772 noninfringing.", expected) != "correct"
+    # an accurate compound holding spans two atomic anchors: never rejected
+    # by spurious status conflict, and never labeled a falsehood (round 22)
+    assert gold_verdict("In 1943 the Supreme Court held Marconi's claims 10 "
+                        "and 11 invalid, but claim 16 valid and infringed.",
+                        expected) != "incorrect"
+    assert gold_verdict("In 1943 the Supreme Court held Marconi's claims 10 "
+                        "and 11 invalid, but claim 16 valid and infringed.",
+                        expected) != "contested"
     assert gold_verdict("In 1943 the Supreme Court later found Stone's "
                         "earlier patent anticipated Marconi's claims 10 and "
                         "11.", expected) == "correct"
@@ -1525,6 +1533,11 @@ def test_status_antonym_and_synonym_matching():
                              "claim 16 was valid and infringed")
     assert _antonym_conflict("held claim 16 unenforceable",
                              "claim 16 was valid and infringed")
+    # opposing statuses on DIFFERENT numbered claims do not conflict (round
+    # 22): an accurate compound holding is not rejected by spurious conflict
+    assert not _antonym_conflict(
+        "held claims 10 and 11 invalid, but claim 16 valid and infringed",
+        "claims 10 and 11 invalid as anticipated by Stone's earlier patent")
     assert _antonym_conflict("the Court voided claim 16",
                              "claim 16 was valid and infringed")
     # unenforceable is a distinct disposition from invalid: it must never

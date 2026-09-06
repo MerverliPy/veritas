@@ -201,21 +201,77 @@ def _status_set(text: str) -> set[str]:
     return out
 
 
+# A status predicate applies to a specific numbered claim ('claims 10 and
+# 11 ... invalid', 'claim 16 ... valid and infringed'). Two opposing
+# statuses only conflict when they scope to the SAME claim (or an
+# unscoped/patent-level status matches anything): an accurate compound
+# holding ('claims 10 and 11 invalid, but claim 16 valid and infringed')
+# must not self-conflict.
+_STATUS_CANON = {w: _STATUS_TERMS[w] for w in _STATUS_TERMS}
+_STATUS_CANON.update(_STATUS_SYNONYMS)
+
+
+def _scoped_statuses(text: str) -> dict[str, set[frozenset[int] | None]]:
+    """Map each canonical status to the claim numbers it scopes to (None
+    when no numbered claim is near — a patent-level or unscoped status)."""
+    low = text.lower()
+    words = [m.group(0) for m in re.finditer(r"[a-z0-9']+", low)]
+    # claim phrases: 'claim 16', 'claims 10 and 11' (token spans)
+    phrases: list[tuple[tuple[int, int], frozenset[int]]] = []
+    for i, w in enumerate(words):
+        if w not in ("claim", "claims"):
+            continue
+        ids: set[int] = set()
+        j = i + 1
+        if j < len(words) and words[j].replace(",", "").isdigit():
+            ids.add(int(words[j].replace(",", "")))
+            if (j + 2 < len(words) and words[j + 1] == "and"
+                    and words[j + 2].isdigit()):
+                ids.add(int(words[j + 2]))
+        if ids:
+            phrases.append(((i, j + 3), frozenset(ids)))
+    canons = set(_STATUS_TERMS.values())
+    out: dict[str, set[frozenset[int] | None]] = {}
+    for i, w in enumerate(words):
+        canon = _STATUS_CANON.get(w)
+        if canon not in canons:
+            continue
+        scope: frozenset[int] | None = None
+        best = 10 ** 9
+        for span, ids in phrases:
+            d = min(abs(i - span[0]), abs(i - span[1]))
+            if d < best:
+                best, scope = d, ids
+        scope = scope if best <= 8 else None
+        out.setdefault(canon, set()).add(scope)
+    return out
+
+
 def _antonym_conflict(statement: str, gold: str) -> bool:
     """True when the two statements assert conflicting status predicates
-    ('granted in 1900' vs 'rejected in 1900', 'claims ... valid' vs
-    'claims ... invalid', 'claim 16 valid and infringed' vs 'claim 16
-    unenforceable'). Word-level similarity cannot see the opposition, and
-    adverse dispositions like unenforceable/voided are distinct from
-    invalid, so an explicit canonical-status conflict stops any of these
-    directions from matching."""
-    sa, ga = _status_set(statement), _status_set(gold)
-    if not sa or not ga:
-        return False
+    scoped to the same thing: 'claims ... invalid' vs 'claims ... valid',
+    'claim 16 valid and infringed' vs 'claim 16 unenforceable', 'granted in
+    1900' vs 'rejected in 1900'. Opposing statuses on DIFFERENT numbered
+    claims ('claims 10 and 11 invalid, but claim 16 valid') do not
+    conflict. Unscoped (patent-level) statuses match any scope."""
+    sa, ga = _scoped_statuses(statement), _scoped_statuses(gold)
     for a, b in _CONFLICTING_STATUSES:
-        if (a in sa and b in ga) or (b in sa and a in ga):
+        aa, bb = sa.get(a), ga.get(b)
+        if aa and bb and _scopes_conflict(aa, bb):
+            return True
+        ab, ba = sa.get(b), ga.get(a)
+        if ab and ba and _scopes_conflict(ab, ba):
             return True
     return False
+
+
+def _scopes_conflict(a: set[frozenset[int] | None],
+                    b: set[frozenset[int] | None]) -> bool:
+    """Two scope sets conflict when either side carries an unscoped status
+    (None) or any claim scope appears on both sides."""
+    if None in a or None in b:
+        return True
+    return any(x & y for x in a for y in b)
 
 
 def _quantities(text: str) -> set[str]:
