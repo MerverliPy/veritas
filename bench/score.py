@@ -126,17 +126,32 @@ _VOID_STATUSES = ("unenforceable", "voided", "vacated", "revoked",
 
 _STATUS_TERMS = {"granted": "granted", "rejected": "rejected",
                  "valid": "valid", "invalid": "invalid",
-                 "earlier": "earlier", "later": "later"}
+                 "infringed": "infringed", "noninfringed": "noninfringed"}
 
 # Pairs of canonical statuses that cannot both be asserted about the same
 # thing: claiming one must never match gold stating the other.
 _CONFLICTING_STATUSES = (("granted", "rejected"), ("valid", "invalid"),
                          ("granted", "void"), ("valid", "void"),
                          ("invalid", "void"), ("rejected", "void"),
-                         ("earlier", "later"))
+                         ("infringed", "noninfringed"))
 
 
 _STATUS_TERMS.update({w: "void" for w in _VOID_STATUSES})
+
+# Prior-art chronology ('Stone's earlier patent' vs 'Stone's later patent') is
+# truth-critical only when the term modifies 'patent'. 'later' is common
+# temporal prose ('the Court later held...'), so scope the conflict to the
+# 'earlier/later patent' phrase rather than unscoped token sets.
+_CHRONOLOGY_PHRASE = re.compile(r"\b(earlier|later)\s+patent\b")
+
+
+def _chronology_conflict(statement: str, gold: str) -> bool:
+    """True when one statement credits an earlier patent and the other a
+    later patent for the same anticipation (an 'earlier patent' claim must
+    never match an 'earlier patent' gold fact with the chronology flipped)."""
+    m1 = _CHRONOLOGY_PHRASE.search(statement.lower())
+    m2 = _CHRONOLOGY_PHRASE.search(gold.lower())
+    return bool(m1 and m2 and m1.group(1) != m2.group(1))
 
 
 def _negation_count(text: str) -> int:
@@ -144,9 +159,11 @@ def _negation_count(text: str) -> int:
     requiring...') must not collapse to the same polarity as a single
     'without'. A 'no' that is a patent/case-number abbreviation ('patent
     No. 763,772' — period followed by a digit) is not counted; a genuine
-    quantified negation ('no 150 countries') still is."""
+    quantified negation ('no 150 countries') still is. Typographic
+    apostrophes (wasn't vs wasn’t) are normalized before counting."""
+    text = text.lower().replace("\u2019", "'").replace("\u2018", "'")
     count = 0
-    for m in _NEGATION.finditer(text.lower()):
+    for m in _NEGATION.finditer(text):
         if m.group(0) == "no" and _NO_ABBREV_FOLLOW.match(text[m.end():]):
             continue  # 'No. <number>' abbreviation, not a negation
         count += 1
@@ -269,6 +286,8 @@ def best_gold_match(statement: str, expected: list[dict]) -> dict | None:
             continue  # same anchored quantity, different value
         if _antonym_conflict(statement, st):
             continue  # status predicate swapped for its antonym
+        if _chronology_conflict(statement, st):
+            continue  # prior-art chronology reversed ('earlier' vs 'later')
         if sneg != eneg:
             continue  # different negation scope/count is a different claim
         sim = _jaccard(statement, st)

@@ -1261,6 +1261,17 @@ def test_d2_radio_priority_claims_never_certified():
     assert gold_verdict("In 1943 the United States Supreme Court held "
                         "Marconi's claims 10 and 11 invalid as anticipated "
                         "by Stone's later patent.", expected) != "correct"
+    # round 19: infringement reversal, curly-apostrophe contractions, and
+    # temporal 'later held' prose that must NOT trigger the chronology guard
+    assert gold_verdict("The Supreme Court held claim 16 of Marconi patent "
+                        "763,772 valid but noninfringed.",
+                        expected) != "correct"
+    assert gold_verdict("In 1943, the United States Supreme Court held claim "
+                        "16 of Marconi's patent 763,772 wasn’t valid or "
+                        "infringed.", expected) != "correct"
+    assert gold_verdict("In 1943 the Supreme Court later held claims 10 and "
+                        "11 invalid as anticipated by Stone's earlier patent.",
+                        expected) == "correct"
     # 'No.' patent abbreviation is not a negation (round-8 P2 matcher fix)
     assert gold_verdict("Tesla's patent No. 645,576 for wireless "
                         "transmission was filed in 1897 and granted in "
@@ -1472,7 +1483,8 @@ def test_status_antonym_and_synonym_matching():
     """granted/rejected and valid/invalid are truth-critical opposites the
     word-level matcher cannot see; grant synonyms normalize onto 'granted'
     so a true claim never tie-breaks into a mirror rejection guard."""
-    from bench.score import _antonym_conflict, gold_verdict
+    from bench.score import (_antonym_conflict, _chronology_conflict,
+                             gold_verdict)
     assert _antonym_conflict("the patent was granted in 1900",
                              "the patent was rejected in 1900")
     assert _antonym_conflict("claims 10 and 11 are invalid",
@@ -1481,8 +1493,6 @@ def test_status_antonym_and_synonym_matching():
                              "claim 16 was valid and infringed")
     assert _antonym_conflict("the Court did invalidate claim 16",
                              "claim 16 was valid and infringed")
-    assert _antonym_conflict("anticipated by Stone's earlier patent",
-                             "anticipated by Stone's later patent")
     assert _antonym_conflict("held claim 16 unenforceable",
                              "claim 16 was valid and infringed")
     assert _antonym_conflict("the Court voided claim 16",
@@ -1495,6 +1505,13 @@ def test_status_antonym_and_synonym_matching():
                              "claims 10 and 11 are valid")
     assert not _antonym_conflict("the patent was granted in 1900",
                                  "the patent was granted in 1901")
+    # prior-art chronology is scoped to the 'X patent' phrase: 'later held'
+    # (temporal prose) must not conflict, 'later patent' (reversed prior art) must
+    assert _chronology_conflict("anticipated by Stone's later patent",
+                                "anticipated by Stone's earlier patent")
+    assert not _chronology_conflict(
+        "the Court later held claims 10 and 11 invalid",
+        "invalid as anticipated by Stone's earlier patent")
     gold = [{"statement": "Tesla's patent was granted in 1900.",
              "gold_label": "correct"},
             {"statement": "Tesla's patent was rejected in 1900.",
