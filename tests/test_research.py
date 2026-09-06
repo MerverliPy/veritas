@@ -75,10 +75,13 @@ def test_crosscheck_plan_sees_primary_subquestions():
     llm = FakeLLM({CROSSCHECK_PLANNER_SYSTEM: plan})
     out = make_crosscheck_plan(llm, Query("compare tools"), "other angle",
                                primary_subquestions=["What is A?",
-                                                     "Is B maintained?"])
+                                                     "Is B maintained?"],
+                               primary_claims=["A was built in 1999",
+                                               "B is unmaintained"])
     assert out.subquestions[0].text == "cross q"
     u = seen["user"]
     assert "What is A?" in u and "Is B maintained?" in u
+    assert "A was built in 1999" in u and "B is unmaintained" in u
     assert "other angle" in u
     assert "compare tools" in u
 

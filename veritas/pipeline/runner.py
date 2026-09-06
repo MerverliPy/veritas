@@ -150,6 +150,9 @@ class Runner:
                     subquestion_limit=max(2, self.max_subquestions // 2),
                     evidence_limit=max(4, self.evidence_per_subquestion // 2),
                     primary_subquestions=[s.text for s in plan.subquestions],
+                    primary_claims=[c.statement for c in verified
+                                    if c.verdict in (Verdict.SUPPORTED,
+                                                     Verdict.PARTIAL)],
                 )
                 self.log("cross-check: corroborated "
                          f"{cross_summary.get('corroborated')} of {primary_before_cross} "

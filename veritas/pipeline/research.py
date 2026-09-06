@@ -60,6 +60,7 @@ def make_crosscheck_plan(
     query: Query,
     seed_note: str,
     primary_subquestions: list[str] | None = None,
+    primary_claims: list[str] | None = None,
 ) -> Plan:
     """Second, independent decomposition for the cross-check pass.
 
@@ -68,6 +69,10 @@ def make_crosscheck_plan(
     facts from different sources (corroboration) and actively probe them for
     counter-evidence (contradiction) instead of drifting onto a wholly
     disjoint or counterfactual angle that nothing can corroborate.
+    ``primary_claims`` (the first pass's asserted claim statements) name the
+    concrete assertions the counter-evidence probes should challenge — an
+    open-ended request's sub-questions cannot tell the planner which date,
+    number or attribution is at stake.
     """
     user = (
         f"Original research request: {query.text}\n"
@@ -79,6 +84,13 @@ def make_crosscheck_plan(
             "\nFirst pass sub-questions (factual ground to independently "
             "re-derive from different sources and probe for counter-evidence):\n"
             + "\n".join(f"- {s}" for s in primary_subquestions)
+            + "\n"
+        )
+    if primary_claims:
+        user += (
+            "\nFirst pass asserted claims (facts to challenge with "
+            "counter-evidence only where genuinely disputed):\n"
+            + "\n".join(f"- {s}" for s in primary_claims)
             + "\n"
         )
     user += "\nRe-plan from this independent angle."

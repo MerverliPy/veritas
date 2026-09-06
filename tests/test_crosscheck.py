@@ -59,6 +59,39 @@ def test_unsupported_primary_is_never_corroborated():
     assert xc in result["candidates"]  # independent claim, not 'agreement'
 
 
+def test_reconcile_subset_sources_do_not_promote():
+    """Deterministic mirror of the semantic rule: primary {A,B} agreed with
+    by a cross claim citing only {A} is subset agreement, not independent
+    evidence — must not promote (Codex P1)."""
+    pc = Claim(
+        id="c1", statement="The USSR orbited Sputnik in October 1957",
+        evidence=[ev("https://wiki.example/s"), ev("https://nasa.example/x")],
+        verdict=Verdict.SUPPORTED, confidence="medium")
+    xc = Claim(
+        id="x1", statement="The USSR orbited Sputnik in October 1957",
+        evidence=[ev("https://wiki.example/s")],
+        verdict=Verdict.SUPPORTED, confidence="medium")
+    result = reconcile([pc], [xc])
+    assert result["corroborated"] == 1
+    assert pc.confidence == "medium"
+    assert pc.crosschecked is True
+
+
+def test_reconcile_promotion_keeps_corroborating_source():
+    """A matched cross claim is consumed (never appended), so a promotion to
+    high must keep the corroborating claim's new source on the primary
+    (report/ledger traceability)."""
+    pc = claim("Veritas ships a nightly JSON batch process", "https://a.example/x")
+    xc = claim("Veritas ships a nightly JSON batch process regularly",
+               "https://b.example/y", cid="x1")
+    result = reconcile([pc], [xc])
+    assert result["corroborated"] == 1
+    assert pc.confidence == "high"
+    assert result["candidates"] == []
+    assert {e.source.locator() for e in pc.evidence} == {
+        "https://a.example/x", "https://b.example/y"}
+
+
 def test_unmatched_cross_claim_becomes_candidate_not_auto_claim():
     pc = claim("Widgets process JSON", "https://a.example/x")
     xc = claim("Llamas are vegetarian herd animals", "https://b.example/y", cid="x1")
@@ -153,6 +186,63 @@ def test_corroborate_from_semantic_promotes_only_on_different_sources():
     assert (flags3, promos3) == (1, 0)
     assert pc3.crosschecked is True
     assert pc3.confidence == "medium"
+
+
+def test_semantic_consumed_evidence_retained_on_primary():
+    """Matched cross claims are consumed (never appended), so their evidence
+    must survive on the claim that now rests on it — the report/ledger must
+    show the independent source that justified the promotion (Codex P1)."""
+    llm = FakeLLM({CORROBORATOR_SYSTEM: json.dumps(
+        {"same_fact_pairs": [[1, 1]]})})
+    pc = claim("Sputnik was launched on 4 Oct 1957", "https://nasa.example/x")
+    xc = claim("The USSR orbited Sputnik in October 1957",
+               "https://esa.example/y", cid="x1")
+    flags, promos, _ = corroborate_from_semantic(llm, [pc], [xc])
+    assert (flags, promos) == (1, 1)
+    assert pc.confidence == "high"
+    assert {e.source.locator() for e in pc.evidence} == {
+        "https://nasa.example/x", "https://esa.example/y"}
+    # same-source agreement adds nothing and must not duplicate evidence
+    pc2 = claim("Sputnik was launched on 4 Oct 1957", "https://wiki.example/s")
+    xc2 = claim("The USSR orbited Sputnik in October 1957",
+                "https://wiki.example/s", cid="x1")
+    flags2, promos2, _ = corroborate_from_semantic(llm, [pc2], [xc2])
+    assert (flags2, promos2) == (1, 0)
+    assert {e.source.locator() for e in pc2.evidence} == {"https://wiki.example/s"}
+
+
+def test_several_cross_claims_corroborate_one_primary():
+    """Several independent claims may restate the same primary fact; the old
+    primary single-use made promotion order-dependent (a same-source match
+    first left the claim medium and pushed the independent paraphrase into
+    the appended list). Counts stay per primary claim."""
+    llm = FakeLLM({CORROBORATOR_SYSTEM: json.dumps(
+        {"same_fact_pairs": [[1, 1], [2, 1]]})})
+    pc = claim("The USSR orbited Sputnik in October 1957", "https://wiki.example/s")
+    xc1 = claim("The USSR orbited Sputnik in Oct 1957", "https://wiki.example/s",
+                cid="x1")   # same source, returned first
+    xc2 = claim("Sputnik 1 entered orbit in October 1957", "https://esa.example/y",
+                cid="x2")   # genuinely new source
+    flags, promos, pairs = corroborate_from_semantic(llm, [pc], [xc1, xc2])
+    assert (flags, promos) == (1, 1)   # one claim corroborated, one promotion
+    assert len(pairs) == 2             # both cross claims consumed, not appended
+    assert pc.confidence == "high"
+    assert {e.source.locator() for e in pc.evidence} == {
+        "https://wiki.example/s", "https://esa.example/y"}
+
+
+def test_semantic_corroborate_cross_index_is_single_use_only():
+    """A cross claim matches at most one primary, but one primary may accept
+    several cross claims — single-use is enforced on the cross index only."""
+    pc1 = claim("A is ten", "https://a")
+    pc2 = claim("B is red", "https://b")
+    xc1 = claim("A equals ten exactly", "https://c", cid="x1")
+    xc2 = claim("A is ten", "https://d", cid="x2")
+    llm = FakeLLM({CORROBORATOR_SYSTEM: json.dumps({
+        "same_fact_pairs": [[1, 1], [1, 2], [2, 1]]})})
+    # [1,2] dropped (xc1 may not match two primaries); [2,1] allowed
+    assert semantic_corroborate(llm, [pc1, pc2], [xc1, xc2]) == [
+        (pc1, xc1), (pc1, xc2)]
 
 
 # -------------------------------------------------------- detect_contradictions
