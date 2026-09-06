@@ -1229,6 +1229,18 @@ def test_d2_radio_priority_claims_never_certified():
     assert gold_verdict("In 1943, the United States Supreme Court voided "
                         "claim 16 of Marconi's patent 763,772.",
                         expected) != "correct"
+    # claim-16 'invalid'-by-Stone must not ride the claims-10/11 anchor; and
+    # unenforceable is a distinct disposition, never credited as invalid
+    assert gold_verdict("In Marconi Wireless Telegraph Co. of America v. "
+                        "United States (1943), the United States Supreme "
+                        "Court held claim 16 of Marconi's patent number "
+                        "763,772 invalid because it was anticipated by the "
+                        "earlier patent of the American inventor John Stone "
+                        "Stone.", expected) != "correct"
+    assert gold_verdict("In 1943 the United States Supreme Court held "
+                        "Marconi's claims 10 and 11 unenforceable as "
+                        "anticipated by Stone's earlier patent.",
+                        expected) != "correct"
     assert gold_verdict("Guglielmo Marconi and Nikola Tesla won the 1909 "
                         "Nobel Prize in Physics.", expected) == "incorrect"
     # 'No.' patent abbreviation is not a negation (round-8 P2 matcher fix)
@@ -1450,6 +1462,11 @@ def test_status_antonym_and_synonym_matching():
                              "claim 16 was valid and infringed")
     assert _antonym_conflict("the Court voided claim 16",
                              "claim 16 was valid and infringed")
+    # unenforceable is NOT the same disposition as invalid (round 15)
+    assert not _antonym_conflict("claims 10 and 11 unenforceable",
+                                 "claims 10 and 11 invalid")
+    assert _antonym_conflict("claims 10 and 11 unenforceable",
+                             "claims 10 and 11 are valid")
     assert not _antonym_conflict("the patent was granted in 1900",
                                  "the patent was granted in 1901")
     gold = [{"statement": "Tesla's patent was granted in 1900.",

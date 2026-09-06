@@ -106,18 +106,33 @@ _NO_ABBREV_FOLLOW = re.compile(r"^\.\s*\d")
 
 # Status predicates whose antonyms are truth-critical: a claim that swaps
 # one for the other states the opposite fact and must never match.
-_ANTONYM_PAIRS = (("granted", "rejected"), ("valid", "invalid"))
-
-# Status synonyms normalized onto the antonym-pair canonical form so a
-# 'granted/issued/awarded' claim is never equidistant from a correct
-# 'granted' entry and its mirror 'rejected' guard (which would tie-break
-# toward the incorrect label).
+# Grant-status synonyms normalized onto 'granted' so a true synonym claim
+# is never equidistant from a correct 'granted' entry and its mirror
+# 'rejected' guard (which would tie-break toward the incorrect label).
+# 'invalidated' is the verb of invalidity and folds onto 'invalid'.
 _STATUS_SYNONYMS = {"issued": "granted", "awarded": "granted",
                      "allowed": "granted", "approved": "granted",
-                     "patented": "granted", "invalidated": "invalid",
-                     "unenforceable": "invalid", "voided": "invalid",
-                     "vacated": "invalid", "revoked": "invalid",
-                     "overturned": "invalid", "cancelled": "invalid"}
+                     "patented": "granted", "invalidated": "invalid"}
+
+# Adverse dispositions (voided, unenforceable, ...) are NOT synonyms of
+# 'invalid': unenforceability and invalidity are distinct patent
+# dispositions, so a claim asserting one must not be credited as the
+# other. They fold onto a separate 'void' marker that conflicts with
+# 'valid', 'invalid', and 'granted' alike.
+_VOID_STATUSES = ("unenforceable", "voided", "vacated", "revoked",
+                   "overturned", "cancelled")
+
+_STATUS_TERMS = {"granted": "granted", "rejected": "rejected",
+                 "valid": "valid", "invalid": "invalid"}
+
+# Pairs of canonical statuses that cannot both be asserted about the same
+# thing: claiming one must never match gold stating the other.
+_CONFLICTING_STATUSES = (("granted", "rejected"), ("valid", "invalid"),
+                         ("granted", "void"), ("valid", "void"),
+                         ("invalid", "void"), ("rejected", "void"))
+
+
+_STATUS_TERMS.update({w: "void" for w in _VOID_STATUSES})
 
 
 def _negation_count(text: str) -> int:
@@ -134,13 +149,30 @@ def _negation_count(text: str) -> int:
     return count
 
 
+def _status_set(text: str) -> set[str]:
+    """Canonical status predicates asserted in ``text`` (after synonym and
+    void-family folding). Empty when the text asserts no status term."""
+    toks = _sig_tokens(text)
+    out: set[str] = set()
+    for t in toks:
+        c = _STATUS_SYNONYMS.get(t, t)
+        if c in _STATUS_TERMS:
+            out.add(_STATUS_TERMS[c])
+    return out
+
+
 def _antonym_conflict(statement: str, gold: str) -> bool:
-    """True when the two statements swap a status predicate for its antonym
+    """True when the two statements assert conflicting status predicates
     ('granted in 1900' vs 'rejected in 1900', 'claims ... valid' vs
-    'claims ... invalid'). Word-level similarity cannot see the opposition,
-    so an explicit pair check stops either direction from matching."""
-    sa, ga = _sig_tokens(statement), _sig_tokens(gold)
-    for a, b in _ANTONYM_PAIRS:
+    'claims ... invalid', 'claim 16 valid and infringed' vs 'claim 16
+    unenforceable'). Word-level similarity cannot see the opposition, and
+    adverse dispositions like unenforceable/voided are distinct from
+    invalid, so an explicit canonical-status conflict stops any of these
+    directions from matching."""
+    sa, ga = _status_set(statement), _status_set(gold)
+    if not sa or not ga:
+        return False
+    for a, b in _CONFLICTING_STATUSES:
         if (a in sa and b in ga) or (b in sa and a in ga):
             return True
     return False
