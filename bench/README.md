@@ -48,9 +48,32 @@ stops after the query that crosses `--cap-usd` and marks the scorecard
 
 | Arm | Command | Feeds |
 |---|---|---|
-| Mainline (cross-check on) | `run_benchmark.py` (default) | A1–A3, A5, A6, A4 (contradiction fires) |
-| Paired (cross-check off) | `run_benchmark.py --no-crosscheck --run-id nocc-pilot` on the same subset | A4 cross-check delta (compare the two scorecards) |
-| Determinism | run a query twice with distinct `--run-id`s | A6 flip rate (pass both ledgers via `score.flip_rate`) |
+| Mainline (cross-check on) | `run_benchmark.py` (default) | A1–A3, A5; A4 + A6 with the inputs below |
+| Paired (cross-check off) | `run_benchmark.py --no-crosscheck --run-id nocc-pilot` on the same subset | A4 same-query delta (see below) |
+| Determinism | run a query >=3 times with distinct `--run-id`s (e.g. `det-1/2/3`) | A6 distribution gate (see below) |
+
+## Evaluating A4 and A6 on existing runs (re-spec)
+
+A4 and A6 compare inputs from OTHER runs, so a single mainline scorecard
+marks them `n/a` until you supply those inputs. Both are scored WITHOUT new
+missions via `--rescore`:
+
+```bash
+# A4: rescore the mainline run with the cross-check-off arm alongside it.
+# Gates on the SAME query ids in both arms (>= 2 pairs, incl. a D query);
+# reports placed-claim populations so a confounded pair is visible.
+python3 bench/run_benchmark.py --rescore out/bench/full-1 \
+    --paired-arm out/bench/full-1-nocc
+
+# A6: >=3 rerun dirs of the same queries feed the distribution gate
+# (median pairwise normalized L1 of confidence counts <= 0.30).
+python3 bench/run_benchmark.py --rescore out/bench/full-1 \
+    --rerun-dirs out/bench/det-1,out/bench/det-2,out/bench/det-3
+```
+
+Each rerun/paired dir holds per-query `out/bench/<run>/<query-id>/ledger.json`
+subdirs (the normal layout). Statement-level `flip_rate` is informational
+under the re-spec; the A6 gate is distribution-level.
 
 ## Boundaries
 

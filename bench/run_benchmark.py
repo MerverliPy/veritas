@@ -13,11 +13,16 @@ Usage:
     python3 bench/run_benchmark.py --ids f1-wannacry,u1  # subset
     python3 bench/run_benchmark.py --no-crosscheck        # paired-arm runs
     python3 bench/run_benchmark.py --cap-usd 0.25         # pilot budget
+    # evaluate A4/A6 on EXISTING runs (no new missions):
+    python3 bench/run_benchmark.py --rescore out/bench/cc-1 \
+        --paired-arm out/bench/nocc-1 --rerun-dirs out/bench/det-1,out/bench/det-2,out/bench/det-3
 
-Scoring is done by ``bench/score.py`` (pure, tested); the paired cross-check
-delta (A4 second half) and determinism reruns need repeated invocations with
-``--no-crosscheck`` / a manual rerun — the scorecard marks those gates
-``na`` until the inputs exist.
+Scoring is done by ``bench/score.py`` (pure, tested). The re-spec A4 (same-
+query paired cross-check delta) and A6 (distribution determinism over >=3
+reruns) gates need inputs from OTHER runs: pass the cross-check-off arm's
+run dir with ``--paired-arm`` and >=3 determinism run dirs with
+``--rerun-dirs`` (each dir holds per-query ``<id>/ledger.json`` subdirs).
+Without them the scorecard marks those gates ``n/a``.
 """
 
 from __future__ import annotations
@@ -46,6 +51,78 @@ from bench.score import (  # noqa: E402
 
 
 _GOLD_LABELS = ("correct", "incorrect", "contested")
+
+
+def _load_optional_paired(paired_arm: str | None,
+                          parser=None) -> list[dict] | None:
+    """Resolve --paired-arm to the other arm's metric list (A4 same-query
+    pairing) or None. Errors abort loudly — a silently-ignored paired arm
+    would report A4 as n/a and look like a real result."""
+    if not paired_arm:
+        return None
+    try:
+        out = load_paired_metrics(paired_arm)
+    except (ValueError, OSError) as e:
+        if parser is not None:
+            parser.error(f"paired arm rejected: {e}")
+        raise
+    if not out and parser is not None:
+        parser.error("paired arm has no scored queries to compare against")
+    return out
+
+
+def _load_optional_reruns(rerun_dirs: str | None, parser=None,
+                          queries: list[dict] | None = None) \
+        -> list[list[dict]] | None:
+    """Resolve --rerun-dirs into A6 rerun groups (>=3 same-query ledgers)."""
+    if not rerun_dirs:
+        return None
+    dirs = [Path(s) for s in rerun_dirs.split(",") if s.strip()]
+    if len(dirs) < 3 and parser is not None:
+        parser.error("determinism needs at least 3 rerun dirs (--rerun-dirs)")
+    ids = [q.get("id") for q in queries] if queries else []
+    return collect_rerun_groups(dirs, ids)
+
+
+def load_paired_metrics(run_dir: Path) -> list[dict]:
+    """Load the OTHER arm's per-query metric list from its scorecard for a
+    same-query A4 comparison (re-spec A4). Returns the metric dicts of that
+    run's ok, scored queries, with ``query_id`` injected from the scorecard
+    entry when the scorer predates the query_id field so pairing still works."""
+    sc = Path(run_dir) / "scorecard.json"
+    if not sc.exists():
+        raise ValueError(f"paired-arm run has no scorecard.json: {run_dir}")
+    data = load_json(sc)
+    out: list[dict] = []
+    for e in data.get("queries", []):
+        if not isinstance(e, dict) or not e.get("ok") or not e.get("metrics"):
+            continue
+        m = dict(e["metrics"])
+        m.setdefault("query_id", e.get("id"))
+        out.append(m)
+    return out
+
+
+def collect_rerun_groups(run_dirs: list[Path], query_ids: list[str]) \
+        -> list[list[dict]]:
+    """Collect determinism rerun ledgers (re-spec A6): for every query id that
+    has a ledger in >= 3 of ``run_dirs``, group those ledgers. Each returned
+    group is one query's >= 3 same-query reruns, ready for ``gates(
+    rerun_groups=...)``. Fewer than 3 usable reruns -> the query contributes
+    nothing (the gate stays n/a for it)."""
+    groups: list[list[dict]] = []
+    for qid in query_ids:
+        ledgers = []
+        for d in run_dirs:
+            lp = Path(d) / qid / "ledger.json"
+            if lp.exists():
+                try:
+                    ledgers.append(load_json(lp))
+                except Exception:  # noqa: BLE001 - one corrupt rerun must not
+                    continue       # drop the whole determinism arm
+        if len(ledgers) >= 3:
+            groups.append(ledgers)
+    return groups
 
 
 def preflight_errors(queries: list[dict], gold_dir: Path) -> list[str]:
@@ -156,10 +233,14 @@ def _assess(q: dict, qtext: str, qout: Path, gold_dir: Path,
 
 def _rescore_main(run_dir: Path, queries: list[dict], gold_dir: Path,
                   judge_enabled: bool, relevance: list[int] | None,
-                  no_crosscheck: bool, cap_usd: float) -> int:
+                  no_crosscheck: bool, cap_usd: float,
+                  paired_metrics: list[dict] | None = None,
+                  rerun_groups: list[list[dict]] | None = None) -> int:
     """Score an existing run dir without new missions. Relevance judgements
     are bound to this run's sample by the caller; the judge spend respects
-    the cap."""
+    the cap. ``paired_metrics`` (the cross-check-off arm's metrics) and
+    ``rerun_groups`` (>=3 same-query rerun ledgers) feed the re-spec A4/A6
+    gates when the owner supplies them."""
     per_query = []
     capped = False
     total_usd = 0.0
@@ -192,7 +273,9 @@ def _rescore_main(run_dir: Path, queries: list[dict], gold_dir: Path,
                   f"queries' judging (scorecard capped-partial)")
     completed = [e for e in per_query if e.get("ok") and e.get("metrics")]
     agg = gates([e["metrics"] for e in completed],
-                relevance_judgements=relevance)
+                relevance_judgements=relevance,
+                q_metrics_nocc=paired_metrics,
+                rerun_groups=rerun_groups)
     n_failed = sum(1 for e in per_query if not e.get("ok")
                    and not e.get("skipped_cap"))
     valid = n_failed == 0 and not capped and len(completed) == len(queries) \
@@ -208,6 +291,8 @@ def _rescore_main(run_dir: Path, queries: list[dict], gold_dir: Path,
                            else "off(--no-judge or no backend)"),
             "relevance_judgements": len(relevance) if relevance else 0,
             "judge_note": "judge cost in each query's llm-rescore.log",
+            "paired_arm": ("on" if paired_metrics else "off"),
+            "rerun_groups": len(rerun_groups) if rerun_groups else 0,
             "capped_partial": capped,
         },
         "valid": valid,
@@ -325,6 +410,14 @@ def main() -> int:
                    help="score an EXISTING run dir (no new missions): load "
                         "its ledgers, apply gold + judge (unless --no-judge) "
                         "+ --relevance judgements, write scorecard-rescore.json")
+    p.add_argument("--paired-arm", metavar="RUN_DIR", default=None,
+                   help="cross-check-off arm's run dir for the A4 same-query "
+                        "paired comparison (its scorecard metrics pair with "
+                        "this run by query_id; rescore + execute)")
+    p.add_argument("--rerun-dirs", default=None,
+                   help="comma-separated determinism run dirs (>=3 per query) "
+                        "whose same-query ledgers feed the re-spec A6 "
+                        "distribution gate (rescore + execute)")
     p.add_argument("--relevance", default=None,
                    help="optional JSON file: list of 0/1 rubric judgements")
     args = p.parse_args()
@@ -404,7 +497,10 @@ def main() -> int:
             relevance_list = judgements
         return _rescore_main(run_dir, resolved, gold_dir, judge_enabled,
                              relevance_list, args.no_crosscheck or nocc_orig,
-                             args.cap_usd)
+                             args.cap_usd,
+                             paired_metrics=_load_optional_paired(args.paired_arm, p),
+                             rerun_groups=_load_optional_reruns(
+                                 args.rerun_dirs, p, resolved))
 
     # execute path: --relevance is a plain 0/1 list (no sample to bind)
     relevance = None
@@ -504,7 +600,10 @@ def main() -> int:
 
     completed = [e for e in per_query if e.get("ok") and e.get("metrics")]
     agg = gates([e["metrics"] for e in completed],
-                relevance_judgements=relevance)
+                relevance_judgements=relevance,
+                q_metrics_nocc=_load_optional_paired(args.paired_arm, p),
+                rerun_groups=_load_optional_reruns(args.rerun_dirs, p,
+                                                   queries))
     n_failed = sum(1 for e in per_query if not e.get("ok")
                    and not e.get("skipped_cap"))
     n_skipped = sum(1 for e in per_query if e.get("skipped_cap"))

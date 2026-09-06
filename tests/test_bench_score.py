@@ -495,6 +495,58 @@ def test_select_queries_reports_unknown_ids():
     assert chosen == [] and unknown == ["nope"]
 
 
+def _write_scorecard(run_dir, entries):
+    (run_dir / "scorecard.json").write_text(json.dumps(
+        {"provenance": {}, "queries": entries}))
+
+
+def test_load_paired_metrics_injects_query_id(tmp_path):
+    """A4 paired-arm loader returns ok scored queries' metrics and injects
+    query_id from the scorecard entry when the scorer predates the field."""
+    from bench.run_benchmark import load_paired_metrics
+    arm = tmp_path / "nocc"
+    arm.mkdir()
+    _write_scorecard(arm, [
+        {"id": "f1", "ok": True, "metrics": {"class": "F",
+                                                "precision_supported": 1.0}},
+        {"id": "u1", "ok": False, "metrics": {}},   # failed -> excluded
+        {"id": "d1", "ok": True, "metrics": {"class": "D"}},
+    ])
+    out = load_paired_metrics(arm)
+    assert [m.get("query_id") for m in out] == ["f1", "d1"]
+    assert [m.get("class") for m in out] == ["F", "D"]
+    with pytest.raises(ValueError):
+        load_paired_metrics(tmp_path / "missing")
+
+
+def test_collect_rerun_groups_requires_three_same_query_ledgers(tmp_path):
+    """A6 determinism helper groups ledgers per query id; a query needs >=3
+    rerun dirs to form a group; corrupt reruns are skipped, not fatal."""
+    from bench.run_benchmark import collect_rerun_groups
+    dirs = []
+    for name in ("det-1", "det-2", "det-3"):
+        d = tmp_path / name
+        (d / "f1").mkdir(parents=True)
+        dirs.append(d)
+    # f1 present in all three; u1 only in two
+    for i, d in enumerate(dirs):
+        (d / "f1" / "ledger.json").write_text(json.dumps(
+            {"claims": [{"statement": f"run {i}", "verdict": "supported",
+                          "confidence": "medium", "subquestion": "q1"}],
+             "confidence_counts": {"medium": 1}}))
+        if i < 2:
+            (d / "u1").mkdir()
+            (d / "u1" / "ledger.json").write_text(json.dumps(
+                {"claims": [], "confidence_counts": {}}))
+    groups = collect_rerun_groups(dirs, ["f1", "u1"])
+    assert len(groups) == 1 and len(groups[0]) == 3      # only f1 qualifies
+    # a corrupt rerun is skipped: f1 drops to 2 usable -> no group forms
+    (dirs[1] / "f1" / "ledger.json").write_text("not json{{")
+    groups2 = collect_rerun_groups(dirs, ["f1"])
+    assert groups2 == []                                  # <3 usable reruns
+
+
+
 def test_parse_relevance_accepts_binary_only(tmp_path):
     def write(v):
         f = tmp_path / "rel.json"
