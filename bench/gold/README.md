@@ -72,7 +72,10 @@ scores each mission ledger against the sheet at `bench/gold/<query_id>.json`
 
 ## Current sheets
 
-All six seed queries have **DRAFT (2026-09-05)** sheets: facts were checked
-against web sources by the drafting agent, but the owner must audit each
-before pilot numbers are treated as meaningful (edit the `note` field when
-audited). `f1-wannacry` supersedes the earlier illustrative example.
+All six seed query sheets are **AUDITED (2026-09-06)**: labels and anchor
+facts were independently re-verified against the public record (each sheet's
+`note` cites the sources; the u1 anchor correction, the u2 added
+54-locomotive anchor, and the f1 contested-relabel rationale are recorded in
+the files). Sheets are owner-curated scoring data the pipeline never reads;
+any future label change should update the per-sheet `note` the same way.
+`f1-wannacry` supersedes the earlier illustrative example.
