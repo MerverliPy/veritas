@@ -1257,6 +1257,10 @@ def test_d2_radio_priority_claims_never_certified():
     assert gold_verdict("In 1943, the United States Supreme Court did "
                         "invalidate claim 16 of Marconi's patent 763,772.",
                         expected) != "correct"
+    # 'earlier' vs 'later' prior-art chronology is truth-critical (round 18)
+    assert gold_verdict("In 1943 the United States Supreme Court held "
+                        "Marconi's claims 10 and 11 invalid as anticipated "
+                        "by Stone's later patent.", expected) != "correct"
     # 'No.' patent abbreviation is not a negation (round-8 P2 matcher fix)
     assert gold_verdict("Tesla's patent No. 645,576 for wireless "
                         "transmission was filed in 1897 and granted in "
@@ -1477,6 +1481,8 @@ def test_status_antonym_and_synonym_matching():
                              "claim 16 was valid and infringed")
     assert _antonym_conflict("the Court did invalidate claim 16",
                              "claim 16 was valid and infringed")
+    assert _antonym_conflict("anticipated by Stone's earlier patent",
+                             "anticipated by Stone's later patent")
     assert _antonym_conflict("held claim 16 unenforceable",
                              "claim 16 was valid and infringed")
     assert _antonym_conflict("the Court voided claim 16",

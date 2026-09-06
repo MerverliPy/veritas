@@ -125,13 +125,15 @@ _VOID_STATUSES = ("unenforceable", "voided", "vacated", "revoked",
                    "overturned", "cancelled", "canceled")
 
 _STATUS_TERMS = {"granted": "granted", "rejected": "rejected",
-                 "valid": "valid", "invalid": "invalid"}
+                 "valid": "valid", "invalid": "invalid",
+                 "earlier": "earlier", "later": "later"}
 
 # Pairs of canonical statuses that cannot both be asserted about the same
 # thing: claiming one must never match gold stating the other.
 _CONFLICTING_STATUSES = (("granted", "rejected"), ("valid", "invalid"),
                          ("granted", "void"), ("valid", "void"),
-                         ("invalid", "void"), ("rejected", "void"))
+                         ("invalid", "void"), ("rejected", "void"),
+                         ("earlier", "later"))
 
 
 _STATUS_TERMS.update({w: "void" for w in _VOID_STATUSES})
