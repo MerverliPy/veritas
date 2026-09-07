@@ -151,13 +151,21 @@ def render_report(report: Report, sources_per_claim: int = DEFAULT_SOURCES_PER_C
     out.append("## Cross-check")
     out.append("")
     xc = report.crosscheck or {}
+    status = report.crosscheck_status or ("ok" if xc else "skipped: disabled")
+    out.append(f"- Cross-check status: {status}")
     if xc:
         out.append(f"- Independent second pass overview: {xc.get('overview') or '—'}")
         out.append(f"- Independent claims produced: {xc.get('cross_claims', 0)}; "
                    f"corroborated primary claims: {xc.get('corroborated', 0)}")
         out.append(f"- Final confidence distribution: "
                    + ", ".join(f"{k}={v}" for k, v in (xc.get("confidence_counts") or {}).items()))
+    elif status.startswith("failed"):
+        out.append("- (the independent cross-check did not complete this run; "
+                   "its claims are absent from the analysis above)")
     else:
         out.append("- (independent cross-check disabled for this run)")
+    out.append(f"- Contradiction detection: {report.conflict_detection_status or 'ok'}")
+    if (report.conflict_detection_status or "ok") == "ok" and not report.conflicts:
+        out.append("- No contradicting pairs found among the assertable claims.")
     out.append("")
     return "\n".join(out)

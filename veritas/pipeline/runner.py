@@ -115,7 +115,8 @@ class Runner:
         all_claims = all_claims[: self.max_claims]
         if not all_claims:
             self.log("no claims extracted — nothing to verify")
-            return self._finalize(query, plan, [], gaps, {}, [])
+            return self._finalize(query, plan, [], gaps, {}, [],
+                                  crosscheck_status="skipped: no claims to verify")
 
         # collapse cross-sub-question duplicates before paying verification cost:
         # keep the copy with the richest evidence, renumber globally
@@ -150,6 +151,10 @@ class Runner:
 
         # ---- 5. independent cross-check
         cross_summary: dict = {}
+        # status persisted to ledger/report: "ok", "skipped: <reason>", or
+        # "failed: <Type>: <msg>" — a silent trigger-chain failure must never
+        # be indistinguishable from "ran and found nothing" (R0.x #1)
+        crosscheck_status = "skipped: disabled"
         primary_before_cross = len(verified)
         if self.enable_crosscheck:
             try:
@@ -171,12 +176,15 @@ class Runner:
                          f"{cross_summary.get('corroborated')} of {primary_before_cross} "
                          "primary claims, appended "
                          f"{cross_summary.get('appended', 0)} candidate claim(s)")
+                crosscheck_status = "ok"
             except Exception as e:
+                crosscheck_status = f"failed: {type(e).__name__}: {e}"
                 self.log(f"cross-check failed (continuing): {type(e).__name__}: {e}")
 
         # ---- 6. synthesize
         return self._finalize(query, plan, verified, gaps, cross_summary,
-                              [c for c in verified if c.verdict in (Verdict.SUPPORTED, Verdict.PARTIAL)])
+                              [c for c in verified if c.verdict in (Verdict.SUPPORTED, Verdict.PARTIAL)],
+                              crosscheck_status=crosscheck_status)
 
     # --------------------------------------------------------------- helpers
     def _finalize(
@@ -187,12 +195,16 @@ class Runner:
         gaps: list[str],
         cross_summary: dict,
         assertable: list[Claim],
+        crosscheck_status: str = "",
     ) -> Report:
         for g in cross_summary.get("cross_gaps", []):
             if g not in gaps:
                 gaps.append(g)
 
         conflicts: list[dict] = []
+        # status persisted to ledger/report: "ok" means the detector ran (and
+        # may legitimately have found zero pairs); "skipped"/"failed" say so
+        conflict_status = "skipped: fewer than two assertable claims"
         if len(assertable) >= 2:
             try:
                 from .crosscheck import detect_contradictions
@@ -207,7 +219,9 @@ class Runner:
                     for x, y in ((a, b), (b, a)):
                         if y.statement not in x.conflicts:
                             x.conflicts.append(y.statement)
+                conflict_status = "ok"
             except Exception as e:
+                conflict_status = f"failed: {type(e).__name__}: {e}"
                 self.log(f"contradiction detection skipped: {type(e).__name__}: {e}")
 
         groups = []
@@ -241,6 +255,8 @@ class Runner:
             gaps=gaps,
             conflicts=conflicts,
             crosscheck=cross_summary,
+            crosscheck_status=crosscheck_status or ("ok" if cross_summary else "skipped: disabled"),
+            conflict_detection_status=conflict_status,
             surfaces_used=query.surface_names(),
         )
         self._write_artifacts(report)
@@ -257,6 +273,8 @@ class Runner:
             "gaps": report.gaps,
             "conflicts": report.conflicts,
             "crosscheck": report.crosscheck,
+            "crosscheck_status": report.crosscheck_status,
+            "conflict_detection_status": report.conflict_detection_status,
         }
         (self.outdir / "ledger.json").write_text(
             json.dumps(ledger, indent=2, ensure_ascii=False))
