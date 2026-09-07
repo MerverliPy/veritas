@@ -18,6 +18,27 @@ from ..schema import Claim, Report, Verdict
 from .prompts import SYNTHESIZER_SYSTEM
 
 ASSERTABLE = {Verdict.SUPPORTED, Verdict.PARTIAL}
+DEFAULT_SOURCES_PER_CLAIM = 3
+
+
+def build_refs(
+    claims: list[Claim],
+    sources_per_claim: int = DEFAULT_SOURCES_PER_CLAIM,
+) -> dict[str, int]:
+    """Return deterministic global reference numbers for claim evidence."""
+    by_q: dict[str, list[Claim]] = {}
+    for c in claims:
+        by_q.setdefault(c.subquestion or "General", []).append(c)
+    refs: dict[str, int] = {}
+    ref_index = 0
+    for claims_for_question in by_q.values():
+        for c in claims_for_question:
+            for ev in c.evidence[:sources_per_claim]:
+                loc = ev.source.locator()
+                if loc not in refs:
+                    ref_index += 1
+                    refs[loc] = ref_index
+    return refs
 
 
 def synth_prose(llm: BaseLLM, report_pre: dict) -> str:
@@ -36,7 +57,7 @@ def synth_prose(llm: BaseLLM, report_pre: dict) -> str:
     return llm.complete(SYNTHESIZER_SYSTEM, user, temperature=0.2, max_tokens=2500)
 
 
-def render_report(report: Report, sources_per_claim: int = 3) -> str:
+def render_report(report: Report, sources_per_claim: int = DEFAULT_SOURCES_PER_CLAIM) -> str:
     """Deterministic markdown report from the ledger. Pure function."""
     out: list[str] = []
     out.append(f"# Research report: {report.query}")
@@ -58,8 +79,7 @@ def render_report(report: Report, sources_per_claim: int = 3) -> str:
     by_q: dict[str, list[Claim]] = {}
     for c in report.claims:
         by_q.setdefault(c.subquestion or "General", []).append(c)
-    ref_index = 0
-    refs: dict[str, int] = {}
+    refs = build_refs(report.claims, sources_per_claim)
     for question, claims in by_q.items():
         out.append(f"### {question}")
         out.append("")

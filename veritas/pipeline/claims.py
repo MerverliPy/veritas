@@ -53,7 +53,10 @@ def extract_claims(
         bound: list[Evidence] = []
         for i in idxs:
             try:
-                bound.append(evidence[int(i) - 1])
+                index = int(i)
+                if not 1 <= index <= len(evidence):
+                    continue
+                bound.append(evidence[index - 1])
             except (ValueError, IndexError, TypeError):
                 continue
         if not bound:

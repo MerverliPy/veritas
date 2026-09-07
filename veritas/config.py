@@ -32,11 +32,7 @@ class Settings:
             "DEEPSEEK_BASE_URL", "https://api.deepseek.com")
         self.deepseek_model: str = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
         self.tavily_key: str = os.environ.get("TAVILY_API_KEY", "")
-        self.brave_key: str = os.environ.get("BRAVE_API_KEY", "")
-        self.serper_key: str = os.environ.get("SERPER_API_KEY", "")
         self.llm_log: str = os.environ.get("VERITAS_LLM_LOG", "")
-        # Quality/time knobs
-        self.max_evidence_per_claim: int = int(os.environ.get("VERITAS_MAX_EVIDENCE", "6"))
         self.web_timeout_s: float = float(os.environ.get("VERITAS_WEB_TIMEOUT", "12"))
 
     def has_reasoning_backend(self) -> bool:

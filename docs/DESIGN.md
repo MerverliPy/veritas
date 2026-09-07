@@ -122,7 +122,7 @@ locator; evidence renders with a confidence tag and inline reference numbers.
 | connector down | empty results + warning logged; mission continues |
 | no evidence for a sub-question | recorded in `gaps` |
 | claim with no valid evidence ref | dropped, recorded as a gap |
-| verifier gets no source text | strict: prefers `unsupported` |
+| verifier gets no source text | judges the quoted passage as a fallback and marks the claim as refetch-degraded |
 | cross-check errors | logged; mission completes without it (flag in report) |
 | prose synthesis errors | report still renders from the ledger (empty Answer) |
 | LLM returns unparseable JSON | `extract_json` lenient scan; raises ⇒ stage-specific handling |

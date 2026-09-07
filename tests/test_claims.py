@@ -67,6 +67,20 @@ def test_non_numeric_index_dropped():
     assert any("dropped" in g for g in gaps)
 
 
+def test_zero_and_negative_indices_are_not_bound():
+    evidence = make_evidence(2)
+    raw = json.dumps({"claims": [
+        {"statement": "Zero index", "evidence_idx": [0]},
+        {"statement": "Negative index", "evidence_idx": [-1]},
+        {"statement": "Out of range", "evidence_idx": [3]},
+        {"statement": "Valid index", "evidence_idx": [1]},
+    ], "noted_gaps": []})
+    claims, gaps = extract_claims(llm_responding(raw), "q", evidence)
+    assert [c.statement for c in claims] == ["Valid index"]
+    assert len(gaps) == 3
+    assert all("dropped" in gap for gap in gaps)
+
+
 def test_duplicate_statements_within_one_call_merged():
     evidence = make_evidence()
     raw = json.dumps({"claims": [

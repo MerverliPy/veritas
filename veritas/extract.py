@@ -8,7 +8,9 @@ warnings instead of raising.
 from __future__ import annotations
 
 import html
+import ipaddress
 import re
+import socket
 import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
@@ -64,6 +66,28 @@ def html_to_text(raw: str | bytes, max_chars: int = 60_000) -> str:
     return text.strip()[:max_chars]
 
 
+def _guard_url(url: str) -> None:
+    """Reject non-public HTTP(S) URLs before a network request."""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        scheme = parsed.scheme.lower()
+        hostname = parsed.hostname
+    except ValueError as exc:
+        raise ValueError(f"invalid URL: {url}") from exc
+    if scheme not in {"http", "https"}:
+        raise ValueError(f"unsupported URL scheme: {scheme or '<none>'}")
+    if not hostname:
+        raise ValueError("URL has no hostname")
+    try:
+        addresses = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise ValueError(f"could not resolve URL host: {hostname}") from exc
+    for address in addresses:
+        ip = ipaddress.ip_address(address[4][0])
+        if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_unspecified:
+            raise ValueError(f"URL host resolves to a non-public address: {hostname}")
+
+
 def fetch_url(
     url: str,
     *,
@@ -71,6 +95,7 @@ def fetch_url(
     max_bytes: int = 2_000_000,
 ) -> tuple[str, str]:
     """GET a URL -> (final_url, html/text payload as str). Raises on failure."""
+    _guard_url(url)
     timeout = timeout or settings.web_timeout_s
     req = urllib.request.Request(
         url,
@@ -82,6 +107,7 @@ def fetch_url(
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         final_url = resp.geturl()
+        _guard_url(final_url)
         data = resp.read(max_bytes + 1)
         if len(data) > max_bytes:
             data = data[:max_bytes]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import stat
 import sys
 
 from veritas.llm import DeepSeekClient
@@ -16,6 +17,7 @@ def test_audit_success_writes_entry_and_stays_quiet(tmp_path, capsys):
     log = tmp_path / "audit.log"
     _client(str(log))._audit("sys", "user", "out")
     assert log.read_text() == "=== system ===\nsys\n=== user ===\nuser\n=== out ===\nout\n\n"
+    assert stat.S_IMODE(log.stat().st_mode) == 0o600
     assert capsys.readouterr().err == ""
 
 

@@ -105,10 +105,24 @@ def test_partial_low_with_correction(tmp_path: Path):
          "better_statement": "most widgets work"})})
     provs = build_providers([Surface.LOCAL], local_root=tmp_path)
     c = claim_with_file_source(tmp_path, "Most widgets work.\n")
+    original = c.statement
     verify_claim(llm, c, {Surface.LOCAL: provs[0]})
     assert c.verdict is Verdict.PARTIAL
     assert c.confidence == "low"
-    assert "Corrected statement: most widgets work" in c.note
+    assert c.statement == "most widgets work"
+    assert f"Original statement: {original}" in c.note
+
+
+def test_partial_without_correction_keeps_statement(tmp_path: Path):
+    llm = FakeLLM({VERIFY_SYSTEM: json.dumps(
+        {"verdict": "partial", "reason": "not fully shown",
+         "better_statement": ""})})
+    provs = build_providers([Surface.LOCAL], local_root=tmp_path)
+    c = claim_with_file_source(tmp_path, "Some widgets work.\n")
+    original = c.statement
+    verify_claim(llm, c, {Surface.LOCAL: provs[0]})
+    assert c.statement == original
+    assert c.note == "not fully shown"
 
 
 def test_contradicted_low_never_assertable(tmp_path: Path):
@@ -161,6 +175,7 @@ def test_refetch_failure_still_judges_on_quoted_passage(tmp_path: Path):
     user_prompt = llm.calls[-1][1]
     assert "refetch failed" in user_prompt
     assert "X is true." in user_prompt
+    assert "all source refetches failed" in c.note
 
 
 def test_web_source_gets_refetched_and_capped(tmp_path: Path):

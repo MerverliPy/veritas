@@ -54,6 +54,21 @@ def test_fetch_missing_file_returns_none(tmp_path: Path):
     assert p.fetch(Source(path="nope.md", title="nope", surface=Surface.LOCAL)) is None
 
 
+def test_fetch_rejects_paths_outside_root(tmp_path: Path):
+    tree = make_tree(tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("must not be readable")
+    p = build_providers([Surface.LOCAL], local_root=tree)[0]
+
+    assert p.fetch(Source(path="../outside.txt", title="outside",
+                         surface=Surface.LOCAL)) is None
+    assert p.fetch(Source(path=str(outside), title="outside",
+                         surface=Surface.LOCAL)) is None
+    assert any("outside root" in warning for warning in p.warnings)
+    assert p.fetch(Source(path="alpha.md", title="inside",
+                         surface=Surface.LOCAL))
+
+
 def test_code_surface_overview_and_git_tracked(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

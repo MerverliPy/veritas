@@ -1,5 +1,5 @@
 """Web provider: keyless search engines + direct URL fetch, with optional
-paid search (Tavily/Brave/Serper) preferred when keys are present.
+paid search (Tavily) preferred when its key is present.
 
 Keyless engines used (all public APIs/endpoints):
   * DuckDuckGo HTML results   — general web fallback
@@ -21,8 +21,8 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 from ..config import settings
-from ..extract import (UA, fetch_readable, find_passages, google_style_snippet,
-                       html_to_text)
+from ..extract import (UA, _guard_url, fetch_readable, find_passages,
+                       google_style_snippet, html_to_text)
 from ..schema import Evidence, Source, Surface
 from .base import Provider
 
@@ -30,14 +30,18 @@ _NS = {"a": "http://www.w3.org/2005/Atom"}
 
 
 def _get_json(url: str, *, timeout: float | None = None, headers: dict | None = None) -> dict | None:
+    _guard_url(url)
     req = urllib.request.Request(url, headers={"User-Agent": UA, **(headers or {})})
     with urllib.request.urlopen(req, timeout=timeout or settings.web_timeout_s) as resp:
+        _guard_url(resp.geturl())
         return json.loads(resp.read().decode("utf-8", errors="replace"))
 
 
 def _get_text(url: str, *, timeout: float | None = None, headers: dict | None = None) -> str:
+    _guard_url(url)
     req = urllib.request.Request(url, headers={"User-Agent": UA, **(headers or {})})
     with urllib.request.urlopen(req, timeout=timeout or settings.web_timeout_s) as resp:
+        _guard_url(resp.geturl())
         return resp.read().decode("utf-8", errors="replace")
 
 
@@ -83,7 +87,7 @@ def wikipedia(query: str, limit: int = 5) -> list[Evidence]:
 
 def arxiv(query: str, limit: int = 4) -> list[Evidence]:
     out: list[Evidence] = []
-    url = ("http://export.arxiv.org/api/query?search_query="
+    url = ("https://export.arxiv.org/api/query?search_query="
            + urllib.parse.quote(f'all:"{query}"') + f"&max_results={limit}")
     raw = _get_text(url, timeout=settings.web_timeout_s + 10)
     root = ET.fromstring(raw)
@@ -156,9 +160,12 @@ def _tavily(query: str, limit: int = 6) -> list[Evidence]:
         return []
     body = json.dumps({"api_key": settings.tavily_key, "query": query,
                        "search_depth": "basic", "max_results": limit}).encode()
-    req = urllib.request.Request("https://api.tavily.com/search", data=body,
+    url = "https://api.tavily.com/search"
+    _guard_url(url)
+    req = urllib.request.Request(url, data=body,
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=settings.web_timeout_s + 10) as resp:
+        _guard_url(resp.geturl())
         data = json.loads(resp.read().decode())
     out = []
     for r in data.get("results", [])[:limit]:
