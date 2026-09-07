@@ -1323,6 +1323,9 @@ def test_d2_radio_priority_claims_never_certified():
     assert gold_verdict("The 1909 Nobel Prize in Physics was awarded to "
                         "Guglielmo Marconi and Karl Ferdinand Braun.",
                         expected) == "correct"
+    assert gold_verdict("The 1909 Nobel Prize in Physics was awarded to "
+                        "Guglielmo Marconi, Karl Ferdinand Braun, and Nikola "
+                        "Tesla.", expected) != "correct"
     assert gold_verdict("Guglielmo Marconi shared the 1909 Nobel Prize in "
                         "Physics alongside Oliver Lodge.",
                         expected) != "correct"
@@ -1330,6 +1333,9 @@ def test_d2_radio_priority_claims_never_certified():
                         "and 11 invalid because Stone's earlier patent "
                         "predated Marconi's later patent.",
                         expected) == "correct"
+    assert gold_verdict("In 1943 the Supreme Court held claims 10 and 11 "
+                        "invalid because Stone's patent anticipated Marconi's "
+                        "patent, which was later.", expected) == "correct"
     # round 25: complete recipient coordination, statement-vs-demonstration,
     # reported-vs-established reception, and 'patent of OWNER' chronology
     assert gold_verdict("Guglielmo Marconi shared the 1909 Nobel Prize in "

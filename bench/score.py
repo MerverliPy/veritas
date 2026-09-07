@@ -149,7 +149,8 @@ _PREPOSED_CHRONO = re.compile(
     r"\b([A-Za-z]+)'s\s+(earlier|later)\s+patents?\b")
 _PREPOSED_NOOWNER = re.compile(r"\b(earlier|later)\s+patents?\b")
 _POSTPOSED_CHRONO = re.compile(
-    r"\b([A-Za-z]+)'s\s+patents?\b[^.]{0,60}?\b"
+    r"\b([A-Za-z]+)'s\s+patents?\b"
+    r"(?:(?!\bpatents?\b)[^.]){0,60}?\b"
     r"(?:was|were|is|are|filed|came|been|issued)"
     r"\s+(?:much\s+|somewhat\s+|slightly\s+|even\s+)?(earlier|later)\b")
 _OF_POSTPOSED_CHRONO = re.compile(
@@ -323,21 +324,26 @@ def _scopes_conflict(a: set[frozenset[int] | None],
 # 1909 Nobel Prize in Physics') never matches an entry whose winner set
 # lacks that person, however high the token overlap.
 _NAME = r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}"
+_NAME_LIST = _NAME + r"(?:(?:,\s*(?:and\s+)?|\s+and\s+)" + _NAME + r")*"
 _AWARD_PAIR = re.compile(
-    r"\b(" + _NAME + r")\s+and\s+(" + _NAME + r")\s+"
+    r"\b(?P<names>" + _NAME_LIST + r")\s+"
     r"(?:won|shared|received|were\s+awarded)\b")
 _AWARD_SINGLE = re.compile(
     r"\b(" + _NAME + r")\s+(?:won|shared|received|was\s+awarded)\b")
 _AWARD_WITH = re.compile(
-    r"\b(?:with|alongside)\s+(?P<names>" + _NAME
-    + r"(?:\s+and\s+" + _NAME + r")*)\b")
+    r"\b(?:with|alongside)\s+(?P<names>" + _NAME_LIST + r")\b")
 _AWARD_VERB = re.compile(r"\b(?:won|shared|received|awarded)\b")
 _AWARD_TO = re.compile(
-    r"\bawarded\s+to\s+(?P<names>" + _NAME
-    + r"(?:\s+and\s+" + _NAME + r")*)\b")
+    r"\bawarded\s+to\s+(?P<names>" + _NAME_LIST + r")\b")
 _NON_PERSON = {"physics", "nobel", "prize", "chemistry", "medal",
                "award", "recognition", "development", "wireless",
                "telegraphy"}
+
+
+def _name_surnames(names: str) -> set[str]:
+    """Extract surnames from a bounded coordinated full-name list."""
+    return {name.split()[-1].rstrip(",")
+            for name in re.findall(_NAME, names)}
 
 
 def _claim_winners(text: str) -> set[str]:
@@ -348,19 +354,17 @@ def _claim_winners(text: str) -> set[str]:
     if "awarded to" in text.lower():
         m = _AWARD_TO.search(text)
         if m:
-            return {name.split()[-1]
-                    for name in m.group("names").split(" and ")}
+            return _name_surnames(m.group("names"))
     m = _AWARD_PAIR.search(text)
-    if m:
-        return {m.group(1).split()[-1], m.group(2).split()[-1]}
+    if m and ("," in m.group("names") or " and " in m.group("names")):
+        return _name_surnames(m.group("names"))
     out: set[str] = set()
     m = _AWARD_SINGLE.search(text)
     if m and m.group(1).split()[-1].lower() not in _NON_PERSON:
         out.add(m.group(1).split()[-1])
     if _AWARD_VERB.search(text):
         for w in _AWARD_WITH.finditer(text):
-            for name in w.group("names").split(" and "):
-                sur = name.split()[-1]
+            for sur in _name_surnames(w.group("names")):
                 if sur.lower() not in _NON_PERSON:
                     out.add(sur)
     return out

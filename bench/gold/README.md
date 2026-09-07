@@ -37,7 +37,6 @@ subset of these names: a claim crediting a wrong co-recipient ("Marconi and
 Popov won ...") can never match, however high the token overlap. The LLM
 judge ignores the field (it reads the statement) but benefits from the
 precise wording.
-```
 
 ## Rules
 
