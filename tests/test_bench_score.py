@@ -387,6 +387,77 @@ def test_a3_claims_less_u_ledger_registers_gap_subquestions():
     assert m["unsupported_share_U_n"] == 0  # claim-level has nothing to say
 
 
+def _fake_claim_judge(mapping: dict[str, str], default: str = "correct"):
+    def judge(statement, expected, query=None):
+        return mapping.get(statement, default)
+    return judge
+
+
+def test_a3_judge_offtopic_arm_marks_tangential_subquestion_unresolved():
+    """Approved §13 judge arm: a U sub-question whose every claim is
+    supported/medium but judged off-topic is honestly unresolved (the
+    pipeline asserted tangential facts, not the asked quantity). A judged
+    correct claim keeps its sub-question resolved."""
+    g = gold("U", [])
+    tangent = "Met steam since 1863."
+    l = ledger([
+        claim(tangent, subquestion="sq1", confidence="medium"),
+        claim("Another tangent on sq1.", subquestion="sq1",
+              confidence="medium"),
+        claim("The 1905 loco count.", subquestion="sq2", confidence="medium"),
+    ])
+    judge = _fake_claim_judge({tangent: "off-topic",
+                               "Another tangent on sq1.": "off-topic"})
+    m = compute_query_metrics(l, g, claim_judge=judge)
+    assert m["subquestion_offtopic_arm"] == "judge"
+    assert m["subquestion_total_n"] == 2
+    assert m["subquestion_unresolved_n"] == 1        # sq1 only
+    assert m["subquestion_unresolved_U"] == 0.5
+    assert m["subquestion_unresolved_judge_only_n"] == 1  # conf-resolved, off-topic
+    assert m["judge_counts"].get("off-topic") == 2   # U claims now judged
+
+
+def test_a3_judge_offtopic_arm_inert_without_judge():
+    """Without a claim judge the instrument runs the confidence arm alone:
+    supported/medium claims keep their sub-question resolved — exactly the
+    pre-wiring behavior (--no-judge / lexical mode)."""
+    g = gold("U", [])
+    l = ledger([claim("Met steam since 1863.", subquestion="sq1")])
+    m = compute_query_metrics(l, g)
+    assert m["subquestion_offtopic_arm"] == "confidence-only"
+    assert m["subquestion_unresolved_n"] == 0
+    assert m["subquestion_unresolved_judge_only_n"] == 0
+
+
+def test_a3_judge_outage_not_counted_as_offtopic():
+    """A judge outage (FALLBACK_UNMATCHED -> 'incorrect') must NOT flip a
+    confident claim into honest failure — the conservative direction."""
+    from bench.score import FALLBACK_UNMATCHED
+    g = gold("U", [])
+    l = ledger([claim("Confident tangent.", subquestion="sq1")])
+    m = compute_query_metrics(l, g,
+                              claim_judge=_fake_claim_judge(
+                                  {}, default=FALLBACK_UNMATCHED))
+    assert m["subquestion_unresolved_n"] == 0
+    assert m["subquestion_unresolved_judge_only_n"] == 0
+    assert m["subquestion_offtopic_arm"] == "judge"
+
+
+def test_a3_judge_mixed_subquestion_stays_resolved():
+    """ALL claims must be (unsupported|low) or judged off-topic for a
+    sub-question to count as honestly unresolved; one judged-correct claim
+    keeps it resolved."""
+    g = gold("U", [])
+    tangent = "Met steam since 1863."
+    l = ledger([
+        claim(tangent, subquestion="sq1", confidence="medium"),
+        claim("The 1905 loco count.", subquestion="sq1", confidence="medium"),
+    ])
+    m = compute_query_metrics(l, g, claim_judge=_fake_claim_judge(
+        {tangent: "off-topic"}))
+    assert m["subquestion_unresolved_n"] == 0
+
+
 def test_normalized_conf_l1_and_subquestion_jaccard():
     from bench.score import normalized_conf_l1, subquestion_jaccard
     same_a = ledger([claim("X.", confidence="medium") for _ in range(4)])

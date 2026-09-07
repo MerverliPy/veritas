@@ -710,7 +710,17 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
         m["fabrication_U"] = sum(
             1 for c in asserted
             if c["verdict"] == "supported" and c["confidence"] == "high")
-        _subquestion_honest_failure(m, ledger)
+        # Re-spec A3 judge arm (§13, owner-approved): when the gold judge is
+        # on, label every U claim; judge 'off-topic' (claim_label maps it to
+        # 'unmatched') means the pipeline did not confidently assert the asked
+        # quantity. Labels ride on the shared memoized claim_label, so U
+        # judge_counts are populated for provenance too. Judge-outage claims
+        # (mapped to 'incorrect') do NOT count as off-topic — conservative.
+        claim_labels: dict[str, str] | None = None
+        if claim_judge is not None:
+            claim_labels = {c["statement"]: claim_label(c["statement"])
+                            for c in asserted}
+        _subquestion_honest_failure(m, ledger, claim_labels)
     if cls == "D":
         # conflict pairs recorded on claims (ledger keeps report-level
         # conflicts inside claim.conflicts when reconciled) or as top-level.
@@ -719,17 +729,24 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
     return m
 
 
-def _subquestion_honest_failure(m: dict, ledger: dict) -> None:
+def _subquestion_honest_failure(m: dict, ledger: dict,
+                                claim_labels: dict[str, str] | None = None
+                                ) -> None:
     """Re-spec A3: honest failure at SUB-QUESTION level. A U sub-question is
     honestly unresolved when every claim attached to it is (unsupported|low)
     — the pipeline did not confidently assert the asked quantity — or it
     produced no claims and is named in a gap (runner emits 'no evidence found
     for: <sub.text>'). The universe is the recoverable one: sub-questions that
     produced claims (their text rides on each claim) plus gap-named ones.
-    Judge off-topic labeling of U claims is the documented optional
-    refinement (U claims are not judged today); until then confidence
-    low/unsupported is the signal. Mutates ``m`` in place; safe for
-    claims-less U ledgers (gap-named sub-questions still register)."""
+    Judge 'off-topic' is the approved §13 judge arm: a supported/medium claim
+    gold does not cover is a confident tangential assertion, not an answer
+    (claim_label maps judge 'off-topic' to 'unmatched'). Judge-outage labels
+    ('incorrect' via FALLBACK_UNMATCHED) do NOT count as off-topic — an
+    unplaceable claim stays on the confidence arm only, the conservative
+    direction for the gate. ``claim_labels`` is None when the judge is off
+    (--no-judge / lexical mode): the instrument then runs on the confidence
+    arm alone, exactly the pre-wiring behavior. Mutates ``m`` in place; safe
+    for claims-less U ledgers (gap-named sub-questions still register)."""
     claims = ledger.get("claims", [])
     by_sq: dict[str, list[dict]] = {}
     for c in claims:
@@ -738,18 +755,32 @@ def _subquestion_honest_failure(m: dict, ledger: dict) -> None:
     gap_named = _gap_named_subquestions(ledger)
     names = set(by_sq) | {g for g in gap_named if g}
     unresolved = 0
+    judge_only = 0
     for name in names:
         cs = by_sq.get(name, [])
         if not cs:
             unresolved += 1            # zero claims, gap-named
-        elif all(c.get("confidence") in ("low", "unsupported")
-                 for c in cs):
-            unresolved += 1
+        else:
+            conf_resolved = any(c.get("confidence") not in ("low", "unsupported")
+                                for c in cs)
+            off = all(c.get("confidence") in ("low", "unsupported")
+                      or (claim_labels or {}).get(c["statement"]) == "unmatched"
+                      for c in cs)
+            if off:
+                unresolved += 1
+                # Provenance: a sub-question unresolved ONLY because the judge
+                # arm labeled its confident claims off-topic would have read
+                # 'resolved' under the confidence-only instrument.
+                if conf_resolved and claim_labels is not None:
+                    judge_only += 1
     total = len(names)
     m["subquestion_unresolved_n"] = unresolved
     m["subquestion_total_n"] = total
     m["subquestion_unresolved_U"] = (unresolved / total if total
                                       else None)
+    m["subquestion_unresolved_judge_only_n"] = judge_only
+    m["subquestion_offtopic_arm"] = ("judge" if claim_labels is not None
+                                     else "confidence-only")
 
 
 def _counts(items: list[dict], key: str) -> dict:
@@ -894,8 +925,9 @@ def gates(q_metrics: list[dict], *,
       at >= 0.05 so a working cross-check pass is observable.
     - A3 measures U honest failure at SUB-QUESTION level: a sub-question is
       honestly unresolved when every claim attached is (unsupported|low) or
-      it produced no claims and appears in a gap; gate >= 0.6 of U
-      sub-questions.
+      judge 'off-topic' (approved §13 judge arm; confidence-only when the
+      judge is off), or it produced no claims and appears in a gap; gate
+      >= 0.6 of U sub-questions.
     - A4 evaluates ONLY on same-query paired arms (>= 2 paired queries,
       matched by query_id): (a) contradiction fires on >= half the paired D
       queries in the with-arm, (b) with-arm high_share > without-arm
@@ -965,6 +997,8 @@ def gates(q_metrics: list[dict], *,
              and m.get("subquestion_total_n")]
     unres_n = sum(m.get("subquestion_unresolved_n", 0) for m in u_sub)
     total_n = sum(m.get("subquestion_total_n", 0) for m in u_sub)
+    judge_only_n = sum(m.get("subquestion_unresolved_judge_only_n", 0)
+                       for m in u_sub)
     u_share = (unres_n / total_n) if total_n else None
     # claim-level share stays informational alongside the sub-question metric
     u_cl = [m for m in q_metrics if m.get("class") == "U"
@@ -1102,9 +1136,12 @@ def gates(q_metrics: list[dict], *,
             "value": {"honest_unresolved_U_subquestions": u_share,
                       "n_subquestions_total": total_n,
                       "n_subquestions_unresolved": unres_n,
+                      "n_unresolved_judge_only": judge_only_n,
                       "unsupported_share_U_claim_level": cl_share},
             "detail": "sub-question level: needs U sub-questions; "
-                       ">= 0.6 honestly unresolved",
+                       ">= 0.6 honestly unresolved; unresolved = all claims "
+                       "(unsupported|low) or judged off-topic (confidence-only "
+                       "arm when judge off)",
         },
         "A4_crosscheck_benefit": {
             "ok": a4_ok,
