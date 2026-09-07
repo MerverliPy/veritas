@@ -1355,6 +1355,13 @@ def test_d2_radio_priority_claims_never_certified():
     assert gold_verdict("In 1943 the Supreme Court held claims 10 and 11 "
                         "invalid because the patent of Stone was later.",
                         expected) != "correct"
+    assert gold_verdict("In 1943 the United States Supreme Court held claim "
+                        "16 of Marconi's patent number 763,772, unlike claims "
+                        "10 and 11, was held invalid and infringed.",
+                        expected) != "correct"
+    assert gold_verdict("In 1943 the Supreme Court held claims 10 and 11 "
+                        "invalid because Stone's patent anticipated Marconi's "
+                        "patent, which was later.", expected) == "correct"
     # 'No.' patent abbreviation is not a negation (round-8 P2 matcher fix)
     assert gold_verdict("Tesla's patent No. 645,576 for wireless "
                         "transmission was filed in 1897 and granted in "

@@ -122,7 +122,7 @@ _STATUS_SYNONYMS = {"issued": "granted", "awarded": "granted",
 # dispositions, so a claim asserting one must not be credited as the
 # other. They fold onto a separate 'void' marker that conflicts with
 # 'valid', 'invalid', and 'granted' alike.
-_VOID_STATUSES = ("unenforceable", "voided", "vacated", "revoked",
+_VOID_STATUSES = ("void", "unenforceable", "voided", "vacated", "revoked",
                    "overturned", "cancelled", "canceled")
 
 _STATUS_TERMS = {"granted": "granted", "rejected": "rejected",
@@ -268,17 +268,24 @@ def _scoped_statuses(text: str) -> dict[str, set[frozenset[int] | None]]:
         canon = _STATUS_CANON.get(w)
         if canon not in canons:
             continue
-        # nearest claim phrase in the SAME clause as this status
+        # nearest claim phrase in the SAME clause as this status. In a
+        # comparison such as 'claim 16 ..., unlike claims 10 and 11, was
+        # held invalid', the postposed predicate belongs to the main
+        # subject (claim 16), not the nearby comparison phrase (10/11).
         break_idx = max((b for b in clause_breaks if b < i), default=-1)
+        unlike_idx = max((j for j, w2 in enumerate(words[:i])
+                          if w2 == "unlike"), default=-1)
         scope: frozenset[int] | None = None
         best = 10 ** 9
         for span, ids in phrases:
             if span[0] <= break_idx:
                 continue  # phrase belongs to an earlier clause
+            if unlike_idx >= 0 and span[0] > unlike_idx:
+                continue  # comparison phrase is not the main subject
             d = min(abs(i - span[0]), abs(i - span[1]))
             if d < best:
                 best, scope = d, ids
-        scope = scope if best <= 8 else None
+        scope = scope if best <= (20 if unlike_idx >= 0 else 8) else None
         out.setdefault(canon, set()).add(scope)
     return out
 
@@ -289,14 +296,26 @@ def _antonym_conflict(statement: str, gold: str) -> bool:
     'claim 16 valid and infringed' vs 'claim 16 unenforceable', 'granted in
     1900' vs 'rejected in 1900'. Opposing statuses on DIFFERENT numbered
     claims ('claims 10 and 11 invalid, but claim 16 valid') do not
-    conflict. Unscoped (patent-level) statuses match any scope. A claim
-    carrying an adverse void-family/noninfringed disposition never matches
-    an entry that asserts none, even when a true clause in the same fused
-    sentence overlaps (the false tail cannot ride the true clause)."""
+    conflict. Unscoped (patent-level) statuses match any scope. A same-status
+    predicate scoped to a different numbered claim is also a different fact
+    and is rejected. A claim carrying an adverse void-family/noninfringed
+    disposition never matches an entry that asserts none, even when a true
+    clause in the same fused sentence overlaps (the false tail cannot ride
+    the true clause)."""
     sa, ga = _scoped_statuses(statement), _scoped_statuses(gold)
     if ({s for s in sa if s in ("void", "noninfringed")}
             and not ({s for s in ga if s in ("void", "noninfringed")})):
         return True
+    # A same-polarity status on a different numbered claim is also a
+    # different fact: 'claim 16 invalid' must not match an atomic
+    # 'claims 10 and 11 invalid' anchor merely because the words overlap.
+    for status in sa.keys() & ga.keys():
+        claim_scopes = sa[status] - {None}
+        gold_scopes = ga[status] - {None}
+        if (claim_scopes and gold_scopes
+                and not any(x & y for x in claim_scopes
+                            for y in gold_scopes)):
+            return True
     for a, b in _CONFLICTING_STATUSES:
         aa, bb = sa.get(a), ga.get(b)
         if aa and bb and _scopes_conflict(aa, bb):
@@ -334,7 +353,8 @@ _AWARD_WITH = re.compile(
     r"\b(?:with|alongside)\s+(?P<names>" + _NAME_LIST + r")\b")
 _AWARD_VERB = re.compile(r"\b(?:won|shared|received|awarded)\b")
 _AWARD_TO = re.compile(
-    r"\bawarded\s+to\s+(?P<names>" + _NAME_LIST + r")\b")
+    r"\bawarded(?:\s+[a-z]+){0,2}\s+to\s+(?P<names>"
+    + _NAME_LIST + r")\b")
 _NON_PERSON = {"physics", "nobel", "prize", "chemistry", "medal",
                "award", "recognition", "development", "wireless",
                "telegraphy"}
@@ -351,10 +371,9 @@ def _claim_winners(text: str) -> set[str]:
     'X and Y won/shared/received' structure, passive 'awarded to X (and Y
     ...)', a single 'X won/received', or 'shared ... with/alongside X (and
     Y ...)'). Empty when the claim names no award winner."""
-    if "awarded to" in text.lower():
-        m = _AWARD_TO.search(text)
-        if m:
-            return _name_surnames(m.group("names"))
+    m = _AWARD_TO.search(text)
+    if m:
+        return _name_surnames(m.group("names"))
     m = _AWARD_PAIR.search(text)
     if m and ("," in m.group("names") or " and " in m.group("names")):
         return _name_surnames(m.group("names"))
