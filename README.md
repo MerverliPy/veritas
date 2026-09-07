@@ -20,7 +20,9 @@ evidence are not. Independent cross-checking runs by default (disable it with
 When you ask a question, `veritas` breaks it into sub-questions and a team of
 specialized roles gathers evidence from the sources you chose. Every claim the
 team makes must cite numbered evidence, and each claim is then checked against
-the **actual source text** — re-fetched fresh, not trusted from memory. An
+the **actual source text** — re-fetched fresh rather than trusted from memory
+(when a source can't be re-fetched, the verdict falls back to the quoted
+passage, and that fallback is recorded on the claim). An
 independent second research pass cross-checks the results, and whatever the
 evidence cannot establish is reported as *Not established* rather than
 papered over. You get a readable `report.md` plus a machine-readable
@@ -63,8 +65,9 @@ pip install -e .       # or: run via  python -m veritas.cli
 ```
 
 Prefer not to clone? `pip install git+https://github.com/MerverliPy/veritas.git`
-works too — just set `DEEPSEEK_API_KEY` in your environment (or a `.env` in
-your working directory) instead of copying `.env.example`.
+works too — just export `DEEPSEEK_API_KEY` in your environment instead of
+copying `.env.example` (the loader reads a `.env` only from the project root,
+not the current working directory).
 
 No paid search key is required — web research uses keyless engines
 (DuckDuckGo, Wikipedia, arXiv, Hacker News, GitHub). Set `TAVILY_API_KEY`
