@@ -1335,6 +1335,9 @@ def test_d2_radio_priority_claims_never_certified():
     assert gold_verdict("Guglielmo Marconi shared the 1909 Nobel Prize in "
                         "Physics with Karl Ferdinand Braun and Nikola Tesla.",
                         expected) != "correct"
+    assert gold_verdict("The 1909 Nobel Prize in Physics was awarded to "
+                        "Guglielmo Marconi and Karl Ferdinand Braun and Nikola "
+                        "Tesla.", expected) != "correct"
     assert gold_verdict("In 1893 Nikola Tesla demonstrated that his wireless "
                         "system could transmit intelligible signals or power "
                         "to any distance without connecting wires.",

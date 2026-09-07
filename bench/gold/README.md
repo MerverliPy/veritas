@@ -19,10 +19,13 @@ scores each mission ledger against the sheet at `bench/gold/<query_id>.json`
       "gold_label": "correct | incorrect | contested",
       "confidence_class": "high | medium | low | unsupported",
       "note": "why this label (optional)",
-      "named_winners": ["Guglielmo Marconi", "Karl Ferdinand Braun"] (optional)
+      "named_winners": ["Guglielmo Marconi", "Karl Ferdinand Braun"]
     }
   ]
 }
+```
+
+`named_winners` is optional; omit it for non-award facts.
 
 ## Optional: `named_winners` (award/attribution facts)
 
@@ -33,7 +36,7 @@ co-recipients (from an "X and Y won/shared/received" structure) to be a
 subset of these names: a claim crediting a wrong co-recipient ("Marconi and
 Popov won ...") can never match, however high the token overlap. The LLM
 judge ignores the field (it reads the statement) but benefits from the
-precise wording.`
+precise wording.
 ```
 
 ## Rules
@@ -81,6 +84,11 @@ precise wording.`
 - `U` (hard/niche) sheets may legitimately contain a *verified anchor* claim
   plus a landscape note saying the target figure is not publicly documented —
   never invent the answer. The point of `U` is honest failure.
+- **Fused claims are judge territory**: the lexical matcher scores one claim
+  against atomic gold entries and cannot arbitrate a sentence that fuses two
+  gold facts or a true fact with a false tail. The LLM judge (default
+  instrument) arbitrates those; the lexical matcher serves `--no-judge` runs
+  and judge-outage fallbacks only.
 
 ## Current sheets
 

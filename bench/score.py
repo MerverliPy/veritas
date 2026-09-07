@@ -332,8 +332,9 @@ _AWARD_WITH = re.compile(
     r"\b(?:with|alongside)\s+(?P<names>" + _NAME
     + r"(?:\s+and\s+" + _NAME + r")*)\b")
 _AWARD_VERB = re.compile(r"\b(?:won|shared|received|awarded)\b")
-_AWARD_TO = re.compile(r"\bawarded\s+to\s+(" + _NAME + r")"
-                       r"(?:\s+and\s+(" + _NAME + r"))?")
+_AWARD_TO = re.compile(
+    r"\bawarded\s+to\s+(?P<names>" + _NAME
+    + r"(?:\s+and\s+" + _NAME + r")*)\b")
 _NON_PERSON = {"physics", "nobel", "prize", "chemistry", "medal",
                "award", "recognition", "development", "wireless",
                "telegraphy"}
@@ -341,16 +342,14 @@ _NON_PERSON = {"physics", "nobel", "prize", "chemistry", "medal",
 
 def _claim_winners(text: str) -> set[str]:
     """Surnames of people a claim names as award winners/recipients (via an
-    'X and Y won/shared/received' structure, passive 'awarded to X (and
-    Y)', a single 'X won/received', or 'shared ... with/alongside X').
-    Empty when the claim names no award winner."""
+    'X and Y won/shared/received' structure, passive 'awarded to X (and Y
+    ...)', a single 'X won/received', or 'shared ... with/alongside X (and
+    Y ...)'). Empty when the claim names no award winner."""
     if "awarded to" in text.lower():
         m = _AWARD_TO.search(text)
         if m:
-            out = {m.group(1).split()[-1]}
-            if m.group(2):
-                out.add(m.group(2).split()[-1])
-            return out
+            return {name.split()[-1]
+                    for name in m.group("names").split(" and ")}
     m = _AWARD_PAIR.search(text)
     if m:
         return {m.group(1).split()[-1], m.group(2).split()[-1]}
