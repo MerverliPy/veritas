@@ -1102,12 +1102,277 @@ def test_real_seed_gold_sheets_pass_preflight():
     repo = Path(__file__).resolve().parents[1]
     spec = json.loads((repo / "bench" / "queries.json").read_text())
     queries = spec["queries"]
-    assert len(queries) == 6
+    assert len(queries) == 7
     for q in queries:
         assert (repo / "bench" / "gold" / f"{q['id']}.json").exists(), \
             f"seed query {q['id']} has no gold sheet"
     errs = preflight_errors(queries, repo / "bench" / "gold")
     assert errs == [], f"gold pre-flight errors: {errs}"
+
+
+def test_d2_radio_priority_claims_never_certified():
+    """d2 regression: flat one-sided 'X invented the radio' claims must
+    resolve to contested entries, never gain correct credit by matching the
+    Tesla-patent or 1943-Supreme-Court anchors (mirror of the d1 test)."""
+    repo = Path(__file__).resolve().parents[1]
+    g = json.loads((repo / "bench" / "gold" / "d2-radio.json").read_text())
+    expected = g["expected_claims"]
+    assert gold_verdict("Guglielmo Marconi invented the radio.",
+                        expected) == "contested"
+    assert gold_verdict("Nikola Tesla invented the radio, not Marconi.",
+                        expected) == "contested"
+    # positive phrasing (no negation) must classify as contested too (P2)
+    assert gold_verdict("Nikola Tesla invented the radio.",
+                        expected) == "contested"
+    # the neutral patent anchor still matches when asserted verbatim-ish
+    assert gold_verdict("In 1900 the United States Patent Office granted "
+                        "Nikola Tesla patent number 645,576 for a wireless "
+                        "transmission system, on an application filed on "
+                        "2 September 1897.", expected) == "correct"
+    # the 320 U.S. 1 Stone-anticipation holding is the accurate reading;
+    # 'patent number 763,772' avoids the lexical negation parser (P2)
+    assert gold_verdict("In Marconi Wireless Telegraph Co. of America v. "
+                        "United States (1943), the United States Supreme "
+                        "Court held that the principal tuning claims of "
+                        "Marconi's wireless patent number 763,772 were "
+                        "invalid because they were anticipated by an earlier "
+                        "patent of the American inventor John Stone Stone.",
+                        expected) == "correct"
+    # concise non-verbatim formulations must still credit the anchors (P2)
+    assert gold_verdict("Tesla's patent 645,576 was filed in 1897 and "
+                        "granted in 1900.", expected) == "correct"
+    assert gold_verdict("The United States Supreme Court held claims 10 and "
+                        "11 of Marconi's patent 763,772 invalid as "
+                        "anticipated by John Stone Stone's earlier patent.",
+                        expected) == "correct"
+    # Marconi-side factual anchor + concise phrasing (round-4 P2)
+    assert gold_verdict("Guglielmo Marconi shared the 1909 Nobel Prize in "
+                        "Physics with Karl Ferdinand Braun in recognition of "
+                        "their contributions to the development of wireless "
+                        "telegraphy.", expected) == "correct"
+    assert gold_verdict("Marconi won the 1909 Nobel Prize in Physics for "
+                        "his work developing wireless telegraphy.",
+                        expected) == "correct"
+    # false 'rejected' disposition of the Tesla patent is never credited
+    assert gold_verdict("Tesla's patent 645,576 for wireless transmission "
+                        "was filed in 1897 and rejected in 1900.",
+                        expected) == "incorrect"
+    # Nobel-fused one-sided invention claims resolve contested, not correct
+    assert gold_verdict("Guglielmo Marconi received the 1909 Nobel Prize in "
+                        "Physics in recognition that he invented the radio.",
+                        expected) == "contested"
+    # entity/category substitutions must never ride the correct anchors
+    assert gold_verdict("In Marconi Wireless Telegraph Co. of America v. "
+                        "United States (1943), the United States Supreme "
+                        "Court held that Marconi's tuning claims were "
+                        "invalid because they were anticipated by Nikola "
+                        "Tesla.", expected) == "incorrect"
+    assert gold_verdict("Guglielmo Marconi received the 1909 Nobel Prize "
+                        "in Chemistry in recognition of his contributions to "
+                        "wireless telegraphy.", expected) == "incorrect"
+    assert gold_verdict("In 1900 the United States Patent Office granted "
+                        "Marconi patent number 645,576 for a wireless "
+                        "transmission system.", expected) == "incorrect"
+    assert gold_verdict("In 1943 the United States Supreme Court held "
+                        "claims 10 and 11 of Marconi's patent number 763,772 "
+                        "valid despite John Stone Stone's earlier patent.",
+                        expected) == "incorrect"
+    assert gold_verdict("Guglielmo Marconi shared the 1909 Nobel Prize in "
+                        "Physics with Nikola Tesla in recognition of their "
+                        "contributions to the development of wireless "
+                        "telegraphy.", expected) == "incorrect"
+    # concise wrong-holder / wrong-co-recipient forms (round-8 P2s)
+    assert gold_verdict("Marconi's patent 645,576 for wireless transmission "
+                        "was filed in 1897 and granted in 1900.",
+                        expected) == "incorrect"
+    assert gold_verdict("Marconi and Tesla won the 1909 Nobel Prize in "
+                        "Physics for wireless telegraphy.",
+                        expected) == "incorrect"
+    assert gold_verdict("Marconi and Braun shared the 1909 Nobel Prize in "
+                        "Physics.", expected) == "correct"
+    # grant synonyms must not tie-break into the rejection guard (round 9)
+    assert gold_verdict("Tesla's patent 645,576 for wireless transmission "
+                        "was filed in 1897 and issued in 1900.",
+                        expected) == "correct"
+    assert gold_verdict("Tesla's patent 645,576 for wireless transmission "
+                        "was filed in 1897 and awarded in 1900.",
+                        expected) == "correct"
+    assert gold_verdict("Tesla's patent 645,576 for wireless transmission "
+                        "was filed in 1897 and allowed in 1900.",
+                        expected) == "correct"
+    assert gold_verdict("Tesla's patent 645,576 for wireless transmission "
+                        "was filed in 1897 and approved in 1900.",
+                        expected) == "correct"
+    assert gold_verdict("Tesla's patent 645,576 for wireless transmission "
+                        "was patented in 1900.", expected) == "correct"
+    # the claim-16 holding (valid and infringed) is a scored anchor too
+    assert gold_verdict("The Supreme Court held claim 16 of Marconi patent "
+                        "763,772 valid and infringed.", expected) == "correct"
+    # concise invalid-holding phrasing credits; 'valid despite' never does
+    assert gold_verdict("In 1943 the Supreme Court held Marconi's claims 10 "
+                        "and 11 invalid due to Stone's earlier patent.",
+                        expected) == "correct"
+    assert gold_verdict("In 1943 the United States Supreme Court held "
+                        "claims 10 and 11 of Marconi's patent number 763,772 "
+                        "valid despite John Stone Stone's earlier patent.",
+                        expected) == "incorrect"
+    # Marconi-only Nobel claims are correct; inflected 'invalidated' reversal
+    # of claim 16 never credits (round-11 P2s)
+    assert gold_verdict("Marconi won the 1909 Nobel Prize in Physics.",
+                        expected) == "correct"
+    assert gold_verdict("In 1943, the United States Supreme Court invalidated "
+                        "claim 16 of Marconi's patent 763,772.",
+                        expected) != "correct"
+    assert gold_verdict("In 1943, the United States Supreme Court held claim "
+                        "16 of Marconi's patent 763,772 unenforceable.",
+                        expected) != "correct"
+    assert gold_verdict("In 1943, the United States Supreme Court voided "
+                        "claim 16 of Marconi's patent 763,772.",
+                        expected) != "correct"
+    # claim-16 'invalid'-by-Stone must not ride the claims-10/11 anchor; and
+    # unenforceable is a distinct disposition, never credited as invalid
+    assert gold_verdict("In Marconi Wireless Telegraph Co. of America v. "
+                        "United States (1943), the United States Supreme "
+                        "Court held claim 16 of Marconi's patent number "
+                        "763,772 invalid because it was anticipated by the "
+                        "earlier patent of the American inventor John Stone "
+                        "Stone.", expected) != "correct"
+    assert gold_verdict("In 1943 the United States Supreme Court held "
+                        "Marconi's claims 10 and 11 unenforceable as "
+                        "anticipated by Stone's earlier patent.",
+                        expected) != "correct"
+    assert gold_verdict("Guglielmo Marconi and Nikola Tesla won the 1909 "
+                        "Nobel Prize in Physics.", expected) == "incorrect"
+    # 'won ... for inventing radio' fusion resolves contested (round 16)
+    assert gold_verdict("Guglielmo Marconi won the Nobel Prize in Physics "
+                        "in 1909 for inventing radio.",
+                        expected) == "contested"
+    assert gold_verdict("In 1943, the United States Supreme Court canceled "
+                        "claim 16 of Marconi's patent 763,772.",
+                        expected) != "correct"
+    # contracted negations + base-form 'invalidate' reach the status checks
+    assert gold_verdict("In 1943, the United States Supreme Court held claim "
+                        "16 of Marconi's patent 763,772 wasn't valid or "
+                        "infringed.", expected) != "correct"
+    assert gold_verdict("In 1943, the United States Supreme Court did "
+                        "invalidate claim 16 of Marconi's patent 763,772.",
+                        expected) != "correct"
+    # 'earlier' vs 'later' prior-art chronology is truth-critical (round 18)
+    assert gold_verdict("In 1943 the United States Supreme Court held "
+                        "Marconi's claims 10 and 11 invalid as anticipated "
+                        "by Stone's later patent.", expected) != "correct"
+    # round 19: infringement reversal, curly-apostrophe contractions, and
+    # temporal 'later held' prose that must NOT trigger the chronology guard
+    assert gold_verdict("The Supreme Court held claim 16 of Marconi patent "
+                        "763,772 valid but noninfringed.",
+                        expected) != "correct"
+    assert gold_verdict("In 1943, the United States Supreme Court held claim "
+                        "16 of Marconi's patent 763,772 wasn’t valid or "
+                        "infringed.", expected) != "correct"
+    assert gold_verdict("In 1943 the Supreme Court later held claims 10 and "
+                        "11 invalid as anticipated by Stone's earlier patent.",
+                        expected) == "correct"
+    # round 20: 'cannot', hyphenated 'non-infringed', postposed chronology
+    assert gold_verdict("The Supreme Court held claim 16 of Marconi patent "
+                        "763,772 cannot be valid or infringed.",
+                        expected) != "correct"
+    assert gold_verdict("The Supreme Court held claim 16 of Marconi patent "
+                        "763,772 valid but non-infringed.",
+                        expected) != "correct"
+    assert gold_verdict("In 1943 the United States Supreme Court held "
+                        "Marconi's claims 10 and 11 invalid as anticipated "
+                        "by Stone's patent, which was later than Marconi's.",
+                        expected) != "correct"
+    # round 21: plural 'later patents', 'noninfringing', temporal 'later
+    # found' prose, and the two cited-evidence anchors
+    assert gold_verdict("In 1943 the United States Supreme Court held "
+                        "Marconi's claims 10 and 11 invalid as anticipated "
+                        "by Stone's later patents.", expected) != "correct"
+    assert gold_verdict("The Supreme Court held claim 16 of Marconi patent "
+                        "763,772 noninfringing.", expected) != "correct"
+    # an accurate compound holding spans two atomic anchors: never rejected
+    # by spurious status conflict, and never labeled a falsehood (round 22)
+    assert gold_verdict("In 1943 the Supreme Court held Marconi's claims 10 "
+                        "and 11 invalid, but claim 16 valid and infringed.",
+                        expected) != "incorrect"
+    assert gold_verdict("In 1943 the Supreme Court held Marconi's claims 10 "
+                        "and 11 invalid, but claim 16 valid and infringed.",
+                        expected) != "contested"
+    assert gold_verdict("In 1943 the Supreme Court later found Stone's "
+                        "earlier patent anticipated Marconi's claims 10 and "
+                        "11.", expected) == "correct"
+    assert gold_verdict("In 1893 Nikola Tesla stated publicly that his "
+                        "wireless system could transmit intelligible signals "
+                        "or power to any distance without connecting wires.",
+                        expected) == "correct"
+    assert gold_verdict("In December 1901 Guglielmo Marconi reported "
+                        "receiving a transatlantic wireless signal at St "
+                        "John's, Newfoundland, transmitted from his station "
+                        "at Poldhu, Cornwall.", expected) == "correct"
+    # round 23: named_winners makes co-recipient identity truth-critical;
+    # fused false tails get no lexical credit (judge arbitrates fusions)
+    assert gold_verdict("Guglielmo Marconi and Alexander Popov won the 1909 "
+                        "Nobel Prize in Physics.", expected) == "incorrect"
+    assert gold_verdict("Guglielmo Marconi and Oliver Lodge won the 1909 "
+                        "Nobel Prize in Physics.", expected) != "correct"
+    assert gold_verdict("In 1943 the United States Supreme Court held claim "
+                        "16 of Marconi's patent number 763,772 valid but "
+                        "noninfringed, while claims 10 and 11 were invalid.",
+                        expected) != "correct"
+    # round 24: passive recipients, 'alongside', owner-bound chronology
+    assert gold_verdict("The 1909 Nobel Prize in Physics was awarded to "
+                        "Guglielmo Marconi and Karl Ferdinand Braun.",
+                        expected) == "correct"
+    assert gold_verdict("The 1909 Nobel Prize in Physics was awarded to "
+                        "Guglielmo Marconi, Karl Ferdinand Braun, and Nikola "
+                        "Tesla.", expected) != "correct"
+    assert gold_verdict("Guglielmo Marconi shared the 1909 Nobel Prize in "
+                        "Physics alongside Oliver Lodge.",
+                        expected) != "correct"
+    assert gold_verdict("In 1943 the Supreme Court held Marconi's claims 10 "
+                        "and 11 invalid because Stone's earlier patent "
+                        "predated Marconi's later patent.",
+                        expected) == "correct"
+    assert gold_verdict("In 1943 the Supreme Court held claims 10 and 11 "
+                        "invalid because Stone's patent anticipated Marconi's "
+                        "patent, which was later.", expected) == "correct"
+    # round 25: complete recipient coordination, statement-vs-demonstration,
+    # reported-vs-established reception, and 'patent of OWNER' chronology
+    assert gold_verdict("Guglielmo Marconi shared the 1909 Nobel Prize in "
+                        "Physics with Karl Ferdinand Braun and Nikola Tesla.",
+                        expected) != "correct"
+    assert gold_verdict("The 1909 Nobel Prize in Physics was awarded to "
+                        "Guglielmo Marconi and Karl Ferdinand Braun and Nikola "
+                        "Tesla.", expected) != "correct"
+    assert gold_verdict("In 1893 Nikola Tesla demonstrated that his wireless "
+                        "system could transmit intelligible signals or power "
+                        "to any distance without connecting wires.",
+                        expected) == "incorrect"
+    assert gold_verdict("In December 1901 Guglielmo Marconi received a "
+                        "transatlantic wireless signal at St John's, "
+                        "Newfoundland, transmitted from his station at Poldhu, "
+                        "Cornwall.", expected) == "incorrect"
+    assert gold_verdict("In 1943 the Supreme Court held claims 10 and 11 "
+                        "invalid because the patent of Stone was later.",
+                        expected) != "correct"
+    assert gold_verdict("In 1943 the United States Supreme Court held claim "
+                        "16 of Marconi's patent number 763,772, unlike claims "
+                        "10 and 11, was held invalid and infringed.",
+                        expected) != "correct"
+    assert gold_verdict("In 1943 the Supreme Court held claims 10 and 11 "
+                        "invalid because Stone's patent anticipated Marconi's "
+                        "patent, which was later.", expected) == "correct"
+    # 'No.' patent abbreviation is not a negation (round-8 P2 matcher fix)
+    assert gold_verdict("Tesla's patent No. 645,576 for wireless "
+                        "transmission was filed in 1897 and granted in "
+                        "1900.", expected) == "correct"
+    assert gold_verdict("Tesla's patent No. 645,576 for wireless "
+                        "transmission was filed in 1897 and rejected in "
+                        "1900.", expected) == "incorrect"
+    # the 'Court declared Tesla the inventor' overclaim must never win credit
+    assert gold_verdict("In 1943 the United States Supreme Court declared "
+                        "Nikola Tesla the inventor of radio.",
+                        expected) != "correct"
 
 
 def test_priority_claim_never_certified_by_patent_fact():
@@ -1285,3 +1550,76 @@ def test_conflicting_month_names_rejected():
     # omitting the month entirely still matches
     assert gold_verdict("The Shadow Brokers released EternalBlue in 2017.",
                         expected) == "correct"
+
+
+def test_negation_count_treats_patent_number_abbreviation_as_non_negation():
+    """'patent No. 763,772' spells a number, not a negation: polarity
+    matching must not reject otherwise-verbatim claims that use the
+    conventional abbreviation, while real negations keep counting."""
+    from bench.score import _negation_count
+    assert _negation_count("patent No. 763,772 was granted in 1900") == 0
+    assert _negation_count("patent no. 763,772") == 0
+    assert _negation_count("no evidence was found") == 1
+    assert _negation_count("did not spread without user interaction") == 2
+    assert _negation_count("no copy of the issue survived") == 1
+    # a quantified negation is not an abbreviation: no period follows 'no'
+    assert _negation_count("affected no 150 countries in May 2017") == 1
+    # contracted negations count (round 17); closed-form cannot (round 20)
+    assert _negation_count("claim 16 wasn't valid") == 1
+    assert _negation_count("the claims weren't infringed") == 1
+    assert _negation_count("claim 16 cannot be valid") == 1
+
+
+def test_status_antonym_and_synonym_matching():
+    """granted/rejected and valid/invalid are truth-critical opposites the
+    word-level matcher cannot see; grant synonyms normalize onto 'granted'
+    so a true claim never tie-breaks into a mirror rejection guard."""
+    from bench.score import (_antonym_conflict, _chronology_conflict,
+                             gold_verdict)
+    assert _antonym_conflict("the patent was granted in 1900",
+                             "the patent was rejected in 1900")
+    assert _antonym_conflict("claims 10 and 11 are invalid",
+                             "claims 10 and 11 are valid")
+    assert _antonym_conflict("the Court invalidated claim 16",
+                             "claim 16 was valid and infringed")
+    assert _antonym_conflict("the Court did invalidate claim 16",
+                             "claim 16 was valid and infringed")
+    assert _antonym_conflict("held claim 16 unenforceable",
+                             "claim 16 was valid and infringed")
+    # opposing statuses on DIFFERENT numbered claims do not conflict (round
+    # 22): an accurate compound holding is not rejected by spurious conflict
+    assert not _antonym_conflict(
+        "held claims 10 and 11 invalid, but claim 16 valid and infringed",
+        "claims 10 and 11 invalid as anticipated by Stone's earlier patent")
+    assert _antonym_conflict("the Court voided claim 16",
+                             "claim 16 was valid and infringed")
+    # unenforceable is a distinct disposition from invalid: it must never
+    # match an 'invalid' anchor for credit, but it does conflict with it
+    assert _antonym_conflict("claims 10 and 11 unenforceable",
+                             "claims 10 and 11 invalid")
+    assert _antonym_conflict("claims 10 and 11 unenforceable",
+                             "claims 10 and 11 are valid")
+    assert not _antonym_conflict("the patent was granted in 1900",
+                                 "the patent was granted in 1901")
+    # prior-art chronology is scoped to the 'X patent' phrase: 'later held'
+    # (temporal prose) must not conflict, 'later patent' (reversed prior art) must
+    assert _chronology_conflict("anticipated by Stone's later patent",
+                                "anticipated by Stone's earlier patent")
+    assert _chronology_conflict(
+        "invalid as anticipated by Stone's patent, which was later than "
+        "Marconi's", "invalid as anticipated by Stone's earlier patent")
+    assert not _chronology_conflict(
+        "the Court later held claims 10 and 11 invalid",
+        "invalid as anticipated by Stone's earlier patent")
+    gold = [{"statement": "Tesla's patent was granted in 1900.",
+             "gold_label": "correct"},
+            {"statement": "Tesla's patent was rejected in 1900.",
+             "gold_label": "incorrect"}]
+    assert gold_verdict("Tesla's patent was issued in 1900.",
+                        gold) == "correct"
+    assert gold_verdict("Tesla's patent was awarded in 1900.",
+                        gold) == "correct"
+    assert gold_verdict("Tesla's patent was allowed in 1900.",
+                        gold) == "correct"
+    assert gold_verdict("Tesla's patent was rejected in 1900.",
+                        gold) == "incorrect"

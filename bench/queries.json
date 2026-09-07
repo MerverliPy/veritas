@@ -27,6 +27,12 @@
       "note": "Disagreement class: genuine historical dispute, sources conflict (incl. the 2002 US House resolution on Meucci). Expect the contradiction pass to fire and no confident one-sided high."
     },
     {
+      "id": "d2-radio",
+      "class": "D",
+      "query": "Was the radio invented by Guglielmo Marconi or by Nikola Tesla?",
+      "note": "Disagreement class, second D sample (A4 re-spec: the contradiction pass must fire on >= half the paired D queries): Marconi-vs-Tesla priority dispute over radio. Factual anchors = the 1900 Tesla patent grant (No. 645,576) and the 1943 Supreme Court ruling in Marconi Wireless Telegraph Co. of America v. United States; flat one-sided credit claims on both sides are genuinely contested. Mirrors the d1-telephone gold sheet shape."
+    },
+    {
       "id": "u1-trieste-1928",
       "class": "U",
       "query": "What was the total annual cargo tonnage handled by the port of Trieste in 1928?",

@@ -18,11 +18,25 @@ scores each mission ledger against the sheet at `bench/gold/<query_id>.json`
       "statement": "precise, independently verifiable claim",
       "gold_label": "correct | incorrect | contested",
       "confidence_class": "high | medium | low | unsupported",
-      "note": "why this label (optional)"
+      "note": "why this label (optional)",
+      "named_winners": ["Guglielmo Marconi", "Karl Ferdinand Braun"]
     }
   ]
 }
 ```
+
+`named_winners` is optional; omit it for non-award facts.
+
+## Optional: `named_winners` (award/attribution facts)
+
+For facts where a person's identity is truth-critical — who shared/won a
+prize, who a record belongs to — add `"named_winners": ["Full Name", ...]`
+to the expected claim. The lexical matcher then requires a claim's award
+co-recipients (from an "X and Y won/shared/received" structure) to be a
+subset of these names: a claim crediting a wrong co-recipient ("Marconi and
+Popov won ...") can never match, however high the token overlap. The LLM
+judge ignores the field (it reads the statement) but benefits from the
+precise wording.
 
 ## Rules
 
@@ -69,13 +83,21 @@ scores each mission ledger against the sheet at `bench/gold/<query_id>.json`
 - `U` (hard/niche) sheets may legitimately contain a *verified anchor* claim
   plus a landscape note saying the target figure is not publicly documented —
   never invent the answer. The point of `U` is honest failure.
+- **Fused claims are judge territory**: the lexical matcher scores one claim
+  against atomic gold entries and cannot arbitrate a sentence that fuses two
+  gold facts or a true fact with a false tail. The LLM judge (default
+  instrument) arbitrates those; the lexical matcher serves `--no-judge` runs
+  and judge-outage fallbacks only.
 
 ## Current sheets
 
-All six seed query sheets are **AUDITED (2026-09-06)**: labels and anchor
+All seven query sheets are **AUDITED (2026-09-06)**: labels and anchor
 facts were independently re-verified against the public record (each sheet's
 `note` cites the sources; the u1 anchor correction, the u2 added
-54-locomotive anchor, and the f1 contested-relabel rationale are recorded in
-the files). Sheets are owner-curated scoring data the pipeline never reads;
-any future label change should update the per-sheet `note` the same way.
-`f1-wannacry` supersedes the earlier illustrative example.
+54-locomotive anchor, the f1 contested-relabel rationale, and the d2-radio
+1943-Supreme-Court anchors are recorded in the files). `d2-radio` was added
+as the second class-D query (A4 re-spec: contradiction pass fires on >= half
+the paired D queries) and mirrors the d1-telephone sheet shape. Sheets are
+owner-curated scoring data the pipeline never reads; any future label change
+should update the per-sheet `note` the same way. `f1-wannacry` supersedes
+the earlier illustrative example.

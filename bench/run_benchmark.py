@@ -43,7 +43,7 @@ sys.path.insert(0, str(REPO))  # allow running from anywhere
 # semantics change; recorded in scorecard provenance so A4 never pairs a
 # main arm scored under one scorer revision with a paired arm scored under
 # another (judge-vs-lexical mode is already checked separately).
-SCORER_REVISION = "r1-gate-respec-1"
+SCORER_REVISION = "r1-gate-respec-3"
 
 from bench.score import (  # noqa: E402
     CLASSES,
