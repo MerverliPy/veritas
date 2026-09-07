@@ -142,7 +142,7 @@ With `--no-crosscheck`, claims cannot reach `high` (no independent corroboration
 ## Development
 
 ```bash
-python3 -m pytest -q        # 52 hermetic tests, no network, FakeLLM-driven
+python3 -m pytest -q        # hermetic suite — no network, FakeLLM-driven
 ```
 
 `veritas run "..." --fake` runs the full pipeline offline with scripted model

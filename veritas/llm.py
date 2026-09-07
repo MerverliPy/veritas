@@ -16,6 +16,7 @@ audit trail of exactly what each role was asked and what it returned.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import threading
@@ -167,7 +168,8 @@ class DeepSeekClient(BaseLLM):
         if not self.log:
             return
         try:
-            with open(self.log, "a") as f:
+            fd = os.open(self.log, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            with os.fdopen(fd, "a") as f:
                 f.write("=== system ===\n%s\n=== user ===\n%s\n=== out ===\n%s\n\n"
                         % (system, user, out))
         except OSError as e:
@@ -220,10 +222,3 @@ class FakeLLM(BaseLLM):
 
     def complete_json(self, system, user, *, temperature=0.0, max_tokens=2048) -> dict:
         return extract_json(self.complete(system, user, temperature=temperature))
-
-
-def default_client() -> BaseLLM:
-    """Create the configured client, or FakeLLM when no key is present."""
-    if settings.has_reasoning_backend():
-        return DeepSeekClient()
-    return FakeLLM({})
