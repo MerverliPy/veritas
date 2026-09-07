@@ -512,6 +512,25 @@ def test_semantic_breakdown_flags_llm_failure_and_promotions():
     assert breakdown2["sem_same_sources"] == 1
 
 
+def test_semantic_breakdown_counts_actual_promotion_not_no_promotion():
+    """Codex P2 (PR #16 round 1): the promotion predicate is evaluated on a
+    claim whose confidence the promotion itself just mutated medium->high,
+    so every actual promotion was misclassified as sem_no_promotion. The
+    pair must be counted under sem_promoted."""
+    from veritas.pipeline.prompts import CORROBORATOR_SYSTEM
+    pc = claim("EternalBlue exploits SMBv1", "https://a.example/x")
+    xc = claim("The SMBv1 flaw enables the EternalBlue exploit",
+               "https://b.example/y", cid="x1")  # genuinely new source
+    llm = FakeLLM({CORROBORATOR_SYSTEM: json.dumps(
+        {"same_fact_pairs": [[1, 1]]})})
+    breakdown: dict = {}
+    flags, promos, _ = corroborate_from_semantic(llm, [pc], [xc], breakdown)
+    assert (flags, promos) == (1, 1)
+    assert pc.confidence == "high"
+    assert breakdown["sem_promoted"] == 1
+    assert breakdown.get("sem_no_promotion", 0) == 0
+
+
 def test_semantic_prompt_carries_similarity_hints():
     """The corroborator prompt annotates each cross claim with its top-k
     token-similar primaries (A2 yield fix) while keeping numeric labels the

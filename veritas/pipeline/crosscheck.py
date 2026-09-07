@@ -408,15 +408,19 @@ def corroborate_from_semantic(
         # but irrelevant new locator (claim verified on the shared source
         # alone) must not drive high (Codex round-6 P1)
         xc_locs = {e.source.locator() for e in xc.evidence if e.supports}
-        if (pc.verdict is Verdict.SUPPORTED
-                and pc.confidence == "medium"
-                and pc_locs and (xc_locs - pc_locs)):
+        # Evaluate the promotion predicate ONCE, before mutating confidence:
+        # promoting sets pc.confidence to 'high', so re-checking '== medium'
+        # afterwards would misclassify every actual promotion as
+        # sem_no_promotion (Codex P2, PR #16 round 1).
+        will_promote = (pc.verdict is Verdict.SUPPORTED
+                        and pc.confidence == "medium"
+                        and pc_locs and (xc_locs - pc_locs))
+        if will_promote:
             pc.confidence = "high"
             promoted.add(id(pc))
         if breakdown is not None:
             # per-pair yield diagnostic (counts pairs, not distinct primaries)
-            if (pc.verdict is Verdict.SUPPORTED and pc.confidence == "medium"
-                    and pc_locs and (xc_locs - pc_locs)):
+            if will_promote:
                 breakdown["sem_promoted"] = breakdown.get("sem_promoted", 0) + 1
             elif not (xc_locs - pc_locs):
                 breakdown["sem_same_sources"] = \
