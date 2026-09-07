@@ -624,6 +624,12 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
                                or c.get("confidence") == "high")
     m["corroboration_rate"] = (m["corroborated_n"] / len(asserted)
                                 if asserted else None)
+    # Cross-check yield breakdown (A2 diagnostic): per-run counts of why each
+    # cross-pass claim did or did not corroborate (no_tokens, below_threshold,
+    # not_verbatim, echo_not_supported, matched_lexical, matched_same_sources,
+    # matched_no_promotion, sem_* from the semantic pass). Ledger-only.
+    m["crosscheck_breakdown"] = dict(
+        (ledger.get("crosscheck") or {}).get("breakdown") or {})
     if gold is None or not claims:
         # A claims-less U ledger still registers gap-named sub-questions as
         # honestly unresolved (re-spec A3) — the pipeline admitted failure.

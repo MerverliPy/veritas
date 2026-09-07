@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from veritas import Claim, Evidence, Source, Surface, Verdict
-from veritas.llm import FakeLLM
+from veritas.llm import FakeLLM, LLMError
 from veritas.pipeline.crosscheck import (
     corroborate_from_semantic,
     detect_contradictions,
@@ -446,3 +446,97 @@ def test_detector_pairs_sorted_and_deduped():
     llm = FakeLLM({CONFLICT_DETECTOR_SYSTEM: json.dumps(
         {"contradicting_pairs": [[2, 1], [4, 3], [2, 1]]})})
     assert detect_contradictions(llm, claims) == [(1, 2), (3, 4)]
+
+
+# ------------------------------------------------- corroboration breakdown
+
+
+def test_reconcile_breakdown_counts_yield_reasons():
+    """The A2 diagnostic: every cross claim that fails to corroborate is
+    counted under its reason in summary['breakdown'] (ledger-only)."""
+    pc = claim("Veritas ships a nightly JSON batch process", "https://a.example/x")
+    # verbatim + supported + SAME locator as primary -> matched, not promoted
+    # (counted while the primary is still medium, i.e. promotable)
+    x_same = claim("Veritas ships a nightly JSON batch process",
+                   "https://a.example/x", cid="x2")
+    # verbatim + supported + NEW locator -> matched + promoted
+    x_new = claim("Veritas ships a nightly JSON batch process",
+                  "https://b.example/y", cid="x1")
+    # token-overlap match, not verbatim -> not_verbatim
+    x_para = claim("Veritas ships a nightly JSON batch process regularly",
+                   "https://b.example/y", cid="x3")
+    # verbatim echo but donor unsupported -> echo_not_supported
+    x_bad = claim("Veritas ships a nightly JSON batch process",
+                  "https://b.example/y", verdict=Verdict.UNSUPPORTED, cid="x4")
+    # no token overlap at all -> below_threshold
+    x_off = claim("The sky is blue in the daytime", "https://c.example/z",
+                  cid="x5")
+    result = reconcile([pc], [x_same, x_new, x_para, x_bad, x_off])
+    bd = result["breakdown"]
+    assert bd["matched_lexical"] == 2          # x_new, x_same
+    assert bd["matched_same_sources"] == 1     # x_same (no new locator)
+    assert bd["not_verbatim"] == 1             # x_para
+    assert bd["echo_not_supported"] == 1       # x_bad
+    assert bd["below_threshold"] == 1          # x_off
+    assert result["corroborated"] == 1
+    assert pc.confidence == "high"             # x_new promoted
+
+
+def test_semantic_breakdown_flags_llm_failure_and_promotions():
+    """A semantic pass whose LLM raises must be countable (sem_llm_failed),
+    not indistinguishable from 'no pairs found'."""
+    from veritas.pipeline.prompts import CORROBORATOR_SYSTEM
+    pc = claim("EternalBlue exploits SMBv1", "https://a.example/x")
+    xc = claim("The SMBv1 flaw enables the EternalBlue exploit",
+               "https://b.example/y", cid="x1")
+
+    class BoomLLM(FakeLLM):
+        def complete(self, system, user, **kw):
+            raise LLMError("outage")
+
+    breakdown: dict = {}
+    flags, promos, pairs = corroborate_from_semantic(
+        BoomLLM({}), [pc], [xc], breakdown)
+    assert (flags, promos, pairs) == (0, 0, [])
+    assert breakdown["sem_llm_failed"] == 1
+
+    llm = FakeLLM({CORROBORATOR_SYSTEM: json.dumps(
+        {"same_fact_pairs": [[1, 1]]})})
+    pc2 = claim("EternalBlue exploits SMBv1", "https://a.example/x")
+    xc2 = claim("The SMBv1 flaw enables the EternalBlue exploit",
+                "https://a.example/x", cid="y1")  # same locator
+    breakdown2: dict = {}
+    flags2, promos2, pairs2 = corroborate_from_semantic(
+        llm, [pc2], [xc2], breakdown2)
+    assert flags2 == 1 and promos2 == 0
+    assert breakdown2["sem_same_sources"] == 1
+
+
+def test_semantic_prompt_carries_similarity_hints():
+    """The corroborator prompt annotates each cross claim with its top-k
+    token-similar primaries (A2 yield fix) while keeping numeric labels the
+    index validator can parse."""
+    pc1 = claim("EternalBlue exploits SMBv1", "https://a.example/x")
+    pc2 = claim("The sky is blue", "https://c.example/z")
+    xc = claim("The SMBv1 flaw enables the EternalBlue exploit",
+               "https://b.example/y", cid="x1")
+    llm = FakeLLM({CORROBORATOR_SYSTEM: json.dumps(
+        {"same_fact_pairs": []})})
+    semantic_corroborate(llm, [pc1, pc2], [xc])
+    user = llm.calls[-1][1]
+    assert "[1] EternalBlue exploits SMBv1" in user
+    assert "token-similar primaries: [1]" in user   # xc ~ pc1 by tokens
+    assert "[2] The sky is blue" in user
+
+
+def test_semantic_hints_never_match_zero_overlap():
+    """A cross claim with no token overlap in common gets no hint line —
+    the model must judge by meaning, not by the annotation."""
+    pc1 = claim("EternalBlue exploits SMBv1", "https://a.example/x")
+    xc = claim("The sky is blue in the daytime", "https://c.example/z",
+               cid="x1")
+    llm = FakeLLM({CORROBORATOR_SYSTEM: json.dumps(
+        {"same_fact_pairs": []})})
+    semantic_corroborate(llm, [pc1], [xc])
+    user = llm.calls[-1][1]
+    assert "token-similar primaries:" not in user

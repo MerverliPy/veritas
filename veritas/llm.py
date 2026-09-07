@@ -133,6 +133,7 @@ class DeepSeekClient(BaseLLM):
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": False,
+            **settings.llm_body_extra,
         }).encode()
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions",
@@ -140,6 +141,7 @@ class DeepSeekClient(BaseLLM):
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.api_key}",
+                **settings.llm_headers,
             },
             method="POST",
         )
