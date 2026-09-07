@@ -30,7 +30,8 @@ from ..schema import Claim, Plan, Query, Report, Verdict
 from .claims import extract_claims
 from .crosscheck import run_crosscheck
 from .research import make_plan, research_subquestion, researcher_notes
-from .synthesize import render_report, synth_prose
+from .synthesize import (DEFAULT_SOURCES_PER_CLAIM, build_refs, render_report,
+                         synth_prose)
 
 LogFn = Callable[[str], None]
 
@@ -213,13 +214,17 @@ class Runner:
         by_q: dict[str, list[Claim]] = {}
         for c in assertable:
             by_q.setdefault(c.subquestion or "General", []).append(c)
+        refs = build_refs(claims, DEFAULT_SOURCES_PER_CLAIM)
         for q, cs in by_q.items():
             groups.append({
                 "question": q,
                 "claims": [{
                     "statement": c.statement,
                     "confidence": c.confidence,
-                    "evids": ", ".join(f"[{i}]" for i in range(1, len(c.evidence) + 1)),
+                    "evids": ", ".join(
+                        f"[{refs[ev.source.locator()]}]"
+                        for ev in c.evidence[:DEFAULT_SOURCES_PER_CLAIM]
+                    ),
                 } for c in cs],
             })
         answer = ""

@@ -5,11 +5,38 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from veritas import Query, Surface, Verdict
+from veritas import Claim, Evidence, Plan, Query, Source, Surface, Verdict
 from veritas.connectors import build_providers
 from veritas.pipeline.runner import Runner
+from veritas.pipeline.synthesize import render_report
+import veritas.pipeline.runner as runner_module
 
 from tests.fake_llm_util import scripted_llm
+
+
+def test_synthesis_receives_global_reference_numbers(tmp_path: Path, monkeypatch):
+    claims = [Claim(
+        id="c1", statement="A sourced fact", subquestion="q",
+        evidence=[Evidence(source=Source(url=f"https://e.example/{i}"), passage="p")
+                  for i in range(1, 5)],
+        verdict=Verdict.SUPPORTED, confidence="medium")]
+    captured = {}
+
+    def capture_synthesis(llm, report_pre):
+        captured.update(report_pre)
+        return "draft"
+
+    monkeypatch.setattr(runner_module, "synth_prose", capture_synthesis)
+    report = Runner(llm=scripted_llm(), enable_crosscheck=False,
+                    outdir=tmp_path / "out")._finalize(
+                        Query("q"), Plan("overview", []), claims, [], {}, claims)
+
+    assert captured["groups"][0]["claims"][0]["evids"] == "[1], [2], [3]"
+    assert "[4]" not in captured["groups"][0]["claims"][0]["evids"]
+    assert report.answer == "draft"
+    rendered = render_report(report)
+    assert "1.  — https://e.example/1" in rendered
+    assert "4.  — https://e.example/4" not in rendered
 
 
 def make_notes(tmp_path: Path) -> Path:
