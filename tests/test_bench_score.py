@@ -488,6 +488,28 @@ def test_a3_relevance_mixed_subquestion_stays_resolved():
     assert m["subquestion_unresolved_n"] == 0
 
 
+def test_a3_relevance_judge_skips_confidence_decided_claims():
+    """Codex P2 (PR #17 round 3): low/unsupported claims are decided by the
+    confidence arm — the paid relevance judge is never called on them (cap
+    discipline: up to ~40 claims per mission would otherwise all be judged)."""
+    g = gold("U", [])
+
+    def strict_rel(statement, subquestion):
+        raise AssertionError("judge must not be called for low/unsupported")
+
+    l = ledger([
+        claim("Weak trace.", subquestion="sq1", verdict="partial",
+              confidence="low"),
+        claim("No data.", subquestion="sq2", verdict="unsupported",
+              confidence="unsupported"),
+    ])
+    m = compute_query_metrics(l, g, relevance_judge=strict_rel)
+    assert m["subquestion_relevance_arm"] == "judge"
+    assert m["subquestion_total_n"] == 2
+    assert m["subquestion_unresolved_n"] == 2   # both resolved by confidence arm
+    assert "subquestion_relevance_counts" not in m
+
+
 def test_a3_claims_less_relevance_on_run_reports_judge_arm():
     """Codex P2 (PR #17 round 1): a claims-less U ledger takes the early
     return; the provenance arm must still read 'judge' when the relevance

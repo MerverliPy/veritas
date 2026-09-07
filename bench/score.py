@@ -735,11 +735,18 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
         if relevance_judge is not None:
             rel_labels = {}
             for c in asserted:
+                # Confidence arm already decides for low/unsupported claims
+                # (they can never be the confident tangent the arm looks
+                # for) — spend the paid judge only where its label matters
+                # (Codex P2, PR #17 round 3; the cap is a real constraint).
+                if c.get("confidence") in ("low", "unsupported"):
+                    continue
                 key = (c["statement"], (c.get("subquestion") or "").strip())
                 if key not in rel_labels:
                     label = relevance_judge(*key)
                     rel_labels[key] = label
                     rel_counts[label] = rel_counts.get(label, 0) + 1
+        if rel_counts:
             m["subquestion_relevance_counts"] = rel_counts
         _subquestion_honest_failure(m, ledger, rel_labels)
     if cls == "D":
