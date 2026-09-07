@@ -6,7 +6,7 @@
 over the **public web**, **local files/notes**, and **codebases**. Every factual
 claim is bound to retrievable evidence and verified against re-fetched source
 text; orchestration is deterministic, while LLM outputs and fetched web
-evidence are not. Independent cross-checking runs when enabled (disable it with
+evidence are not. Independent cross-checking runs by default (disable it with
 `--no-crosscheck`); uncertainty is stated, never hidden.
 
 ```mermaid

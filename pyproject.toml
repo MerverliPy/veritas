@@ -2,6 +2,10 @@
 name = "veritas"
 version = "0.1.0"
 description = "Accurate and reliable agent research team: multi-role pipeline (plan -> research -> claim -> verify -> cross-check -> synthesize) over web, local files, and codebases, with per-claim confidence and explicit uncertainty."
+license = {text = "MIT"}
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+]
 requires-python = ">=3.12"
 dependencies = []
 
