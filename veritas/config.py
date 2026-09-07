@@ -47,14 +47,29 @@ class Settings:
         except (ValueError, AttributeError):
             self.llm_headers = {}
         # Optional extra request-body fields (JSON object) merged into every
-        # chat completion, e.g. {"reasoning_effort": "low"} for reasoning
-        # models whose default effort can consume the whole token budget.
+        # chat completion, e.g. {"reasoning_effort": "low"} or {"max_tokens":
+        # 16384} for reasoning models whose default effort can consume the
+        # whole token budget. NOTE: response_format belongs in
+        # VERITAS_LLM_JSON_BODY_EXTRA (below), not here — body extras leak
+        # into free-form prose calls, and JSON mode must not constrain them
+        # (Codex P1, PR #16 round 2).
         # Parse failures leave it empty — never fatal at import time.
         try:
             self.llm_body_extra: dict = dict(
                 json.loads(os.environ.get("VERITAS_LLM_BODY_EXTRA", "{}")))
         except (ValueError, TypeError):
             self.llm_body_extra = {}
+        # Optional JSON-only extra body fields (JSON object), merged only into
+        # structured (complete_json) requests — e.g.
+        # {"response_format": {"type": "json_object"}} for gateways that need
+        # explicit JSON mode. Never applied to free-form prose calls: a
+        # provider enforcing JSON mode would reject the prose prompt or wrap
+        # its answer in a JSON object (Codex P1, PR #16 round 2).
+        try:
+            self.llm_json_body_extra: dict = dict(
+                json.loads(os.environ.get("VERITAS_LLM_JSON_BODY_EXTRA", "{}")))
+        except (ValueError, TypeError):
+            self.llm_json_body_extra = {}
 
     def has_reasoning_backend(self) -> bool:
         return bool(self.deepseek_key)

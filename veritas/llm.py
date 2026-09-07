@@ -15,6 +15,7 @@ audit trail of exactly what each role was asked and what it returned.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import re
@@ -26,6 +27,14 @@ import urllib.request
 from typing import Any, Callable
 
 from .config import settings
+
+# Set by BaseLLM.complete_json while its request is in flight so the client
+# can apply JSON-only body extras (e.g. response_format) to structured
+# completions without leaking them into free-form prose calls — a provider
+# enforcing JSON mode would reject the prose prompt or wrap its answer in a
+# JSON object (Codex P1, PR #16 round 2).
+_json_mode: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "veritas_json_mode", default=False)
 
 
 class LLMError(RuntimeError):
@@ -101,7 +110,12 @@ class BaseLLM:
         temperature: float = 0.0,
         max_tokens: int = 2048,
     ) -> dict:
-        raw = self.complete(system, user, temperature=temperature, max_tokens=max_tokens)
+        tok = _json_mode.set(True)
+        try:
+            raw = self.complete(system, user, temperature=temperature,
+                                max_tokens=max_tokens)
+        finally:
+            _json_mode.reset(tok)
         return extract_json(raw)
 
 
@@ -134,6 +148,9 @@ class DeepSeekClient(BaseLLM):
             "max_tokens": max_tokens,
             "stream": False,
             **settings.llm_body_extra,
+            # JSON-only extras ride ONLY on structured completions; prose
+            # (complete) calls must stay free-form.
+            **(settings.llm_json_body_extra if _json_mode.get() else {}),
         }).encode()
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions",

@@ -96,11 +96,46 @@ def test_gateway_headers_and_body_extra_are_merged(monkeypatch):
     assert captured["headers"]["x-opencode-session"] == "test-session"
 
 
+def test_json_body_extra_applies_only_to_structured_completions(monkeypatch):
+    """Codex P1 (PR #16 round 2): VERITAS_LLM_JSON_BODY_EXTRA (e.g.
+    response_format=json_object) must ride ONLY on complete_json requests —
+    a provider enforcing JSON mode would reject the free-form prose prompt or
+    wrap its answer in a JSON object. All-call extras (max_tokens) still
+    apply to both. Hermetic: urlopen is stubbed."""
+    from veritas import llm as llm_mod
+
+    captured: list[dict] = []
+
+    def fake_urlopen(req, timeout=None):
+        body = json.loads(req.data.decode())
+        captured.append(body)
+        prose = "prose answer" if body["messages"][-1]["content"] == "user" \
+            else '{"ok": true}'
+        return io.BytesIO(json.dumps(
+            {"choices": [{"message": {"content": prose}}]}).encode())
+
+    monkeypatch.setattr(llm_mod.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(llm_mod.settings, "llm_body_extra",
+                        {"max_tokens": 16384})
+    monkeypatch.setattr(llm_mod.settings, "llm_json_body_extra",
+                        {"response_format": {"type": "json_object"}})
+    client = DeepSeekClient(api_key="k", base_url="https://gw.example/v1",
+                            model="glm-5.3-flash", log="")
+    assert client.complete("sys", "user") == "prose answer"
+    assert captured[-1]["max_tokens"] == 16384          # all-call extra
+    assert "response_format" not in captured[-1]        # JSON mode NOT leaked
+    assert client.complete_json("sys", "user2") == {"ok": True}
+    assert captured[-1]["response_format"] == {"type": "json_object"}
+    assert captured[-1]["max_tokens"] == 16384
+
+
 def test_malformed_optional_json_env_degrades_to_empty(monkeypatch):
     """A misconfigured VERITAS_LLM_HEADERS / VERITAS_LLM_BODY_EXTRA must never
     kill a mission at settings time — parse failures degrade to empty."""
     monkeypatch.setenv("VERITAS_LLM_HEADERS", "{not json")
     monkeypatch.setenv("VERITAS_LLM_BODY_EXTRA", "[1, 2]")  # valid JSON, not object
+    monkeypatch.setenv("VERITAS_LLM_JSON_BODY_EXTRA", "{nope")
     s = Settings()
     assert s.llm_headers == {}
     assert s.llm_body_extra == {}
+    assert s.llm_json_body_extra == {}
