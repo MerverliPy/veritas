@@ -215,6 +215,11 @@ class Report:
     gaps: list[str] = field(default_factory=list)   # things sources could not establish
     conflicts: list[dict] = field(default_factory=list)  # {a, b, resolution, resolved}
     crosscheck: dict = field(default_factory=dict)  # summary of independent pass
+    # Stage status so "0 fires" never conflates "didn't run" with "ran and
+    # found nothing". Vocabulary: "ok" | "skipped: <reason>" |
+    # "failed: <ExceptionType>: <message>". Empty string = older artifact.
+    crosscheck_status: str = ""
+    conflict_detection_status: str = ""
     surfaces_used: list[str] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
 

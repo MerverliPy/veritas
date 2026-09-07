@@ -320,6 +320,9 @@ def test_full_mission_offline(tmp_path: Path):
     ledger = json.loads((outdir / "ledger.json").read_text())
     assert ledger["query"] == "Compare AlphaNote and BetaNote"
     assert len(ledger["claims"]) == len(report.claims)
+    # trigger-chain statuses: both stages ran (R0.x #1)
+    assert ledger["crosscheck_status"] == "ok"
+    assert ledger["conflict_detection_status"] == "ok"
     assert "evidence" in ledger["claims"][0]
     # every ledger claim carries its source locator
     loc = (ledger["claims"][0]["evidence"][0]["source"].get("url")
@@ -435,3 +438,111 @@ def test_verification_failure_is_degraded_and_order_is_preserved(tmp_path: Path,
     assert report.claims[1].verdict is Verdict.UNSUPPORTED
     assert report.claims[1].confidence == "unsupported"
     assert "verification failed" in report.claims[1].note
+
+
+# ------------------------------------------------------- trigger-chain status
+# R0.x #1 (2026-09-07): a failed cross-check/conflict-detection call used to
+# vanish — console log only, empty ledger entry, report claiming "disabled".
+# The ledger/report now persist crosscheck_status /
+# conflict_detection_status so "0 fires" never conflates "didn't run" with
+# "ran and found nothing" (A4 re-judge depends on clean data).
+
+def test_crosscheck_failure_is_persisted_not_silent(tmp_path: Path):
+    notes = make_notes(tmp_path)
+    plan = json.dumps({"overview": "compare the two tools",
+        "subquestions": [
+            {"text": "What does AlphaNote do and what is its version?", "rationale": "r"},
+            {"text": "Is BetaNote maintained?", "rationale": "r"}],
+        "crosscheck_seed_note": "maintenance angle"})
+    claims = json.dumps({"claims": [
+        {"statement": "AlphaNote processes JSON files nightly.", "evidence_idx": [1]},
+        {"statement": "BetaNote is unmaintained since 2023.", "evidence_idx": [1]},
+    ], "noted_gaps": []})
+    llm = scripted_llm(plan=plan, cross_plan=lambda _user: (_ for _ in ()).throw(
+        RuntimeError("gateway down")))
+    outdir = tmp_path / "out"
+    report = Runner(llm=llm, providers=build_providers([Surface.LOCAL], local_root=notes),
+                    outdir=outdir).run(Query("Compare AlphaNote and BetaNote",
+                                             surfaces=[Surface.LOCAL]))
+
+    assert report.crosscheck == {}
+    assert report.crosscheck_status == "failed: RuntimeError: gateway down"
+    ledger = json.loads((outdir / "ledger.json").read_text())
+    assert ledger["crosscheck_status"] == "failed: RuntimeError: gateway down"
+    rendered = render_report(report)
+    assert "Cross-check status: failed: RuntimeError: gateway down" in rendered
+    assert "did not complete this run" in rendered
+    assert "disabled for this run" not in rendered
+
+
+def test_conflict_detection_failure_is_persisted_not_silent(tmp_path: Path):
+    notes = make_notes(tmp_path)
+    plan = json.dumps({"overview": "compare the two tools",
+        "subquestions": [
+            {"text": "What does AlphaNote do and what is its version?", "rationale": "r"},
+            {"text": "Is BetaNote maintained?", "rationale": "r"}],
+        "crosscheck_seed_note": "maintenance angle"})
+    claims = json.dumps({"claims": [
+        {"statement": "AlphaNote processes JSON files nightly.", "evidence_idx": [1]},
+        {"statement": "BetaNote is unmaintained since 2023.", "evidence_idx": [1]},
+    ], "noted_gaps": []})
+    llm = scripted_llm(plan=plan, claims=claims)
+    llm.responses["You are Veritas Conflict Detector."] = lambda _u: (_ for _ in ()).throw(
+        RuntimeError("detector outage"))
+    outdir = tmp_path / "out"
+    report = Runner(llm=llm, providers=build_providers([Surface.LOCAL], local_root=notes),
+                    enable_crosscheck=False,
+                    outdir=outdir).run(Query("Compare AlphaNote and BetaNote",
+                                             surfaces=[Surface.LOCAL]))
+
+    assert report.crosscheck_status == "skipped: disabled"
+    assert report.conflict_detection_status == "failed: RuntimeError: detector outage"
+    ledger = json.loads((outdir / "ledger.json").read_text())
+    assert ledger["conflict_detection_status"] == "failed: RuntimeError: detector outage"
+    rendered = render_report(report)
+    assert "(independent cross-check disabled for this run)" in rendered
+    assert "Contradiction detection: failed: RuntimeError: detector outage" in rendered
+
+
+def test_ran_and_found_nothing_is_explicit(tmp_path: Path):
+    """The A4-critical distinction: status 'ok' with zero conflicts means the
+    detector ran and found nothing — never rendered as a silent no-op."""
+    notes = make_notes(tmp_path)
+    outdir = tmp_path / "out"
+    plan = json.dumps({"overview": "compare the two tools",
+        "subquestions": [
+            {"text": "What does AlphaNote do and what is its version?", "rationale": "r"},
+            {"text": "Is BetaNote maintained?", "rationale": "r"}],
+        "crosscheck_seed_note": "maintenance angle"})
+    claims = json.dumps({"claims": [
+        {"statement": "AlphaNote processes JSON files nightly.", "evidence_idx": [1]},
+        {"statement": "BetaNote is unmaintained since 2023.", "evidence_idx": [1]},
+    ], "noted_gaps": []})
+    report = Runner(llm=scripted_llm(plan=plan, claims=claims),
+                    providers=build_providers([Surface.LOCAL], local_root=notes),
+                    enable_crosscheck=False,
+                    outdir=outdir).run(Query("Compare AlphaNote and BetaNote",
+                                             surfaces=[Surface.LOCAL]))
+
+    assert report.crosscheck_status == "skipped: disabled"
+    assert report.conflict_detection_status == "ok"
+    assert report.conflicts == []
+    ledger = json.loads((outdir / "ledger.json").read_text())
+    assert ledger["crosscheck_status"] == "skipped: disabled"
+    assert ledger["conflict_detection_status"] == "ok"
+    rendered = render_report(report)
+    assert "Contradiction detection: ok" in rendered
+    assert "No contradicting pairs found among the assertable claims." in rendered
+
+
+def test_no_claims_run_reports_skipped_statuses(tmp_path: Path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    llm = scripted_llm(plan=json.dumps({"overview": "x", "subquestions": [
+        {"text": "What color is the sky in this void?", "rationale": "r"}],
+        "crosscheck_seed_note": "n/a"}))
+    report = Runner(llm=llm, providers=build_providers([Surface.LOCAL], local_root=empty),
+                    outdir=tmp_path / "o").run(Query("color of sky", surfaces=[Surface.LOCAL]))
+
+    assert report.crosscheck_status == "skipped: no claims to verify"
+    assert report.conflict_detection_status == "skipped: fewer than two assertable claims"
