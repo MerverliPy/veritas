@@ -387,65 +387,95 @@ def test_a3_claims_less_u_ledger_registers_gap_subquestions():
     assert m["unsupported_share_U_n"] == 0  # claim-level has nothing to say
 
 
-def _fake_claim_judge(mapping: dict[str, str], default: str = "correct"):
-    def judge(statement, expected, query=None):
-        return mapping.get(statement, default)
-    return judge
+def _fake_relevance_judge(mapping: dict[tuple[str, str], str],
+                          default: str = "answers"):
+    def rel(statement, subquestion):
+        return mapping.get((statement, subquestion), default)
+    return rel
 
 
-def test_a3_judge_offtopic_arm_marks_tangential_subquestion_unresolved():
-    """Approved §13 judge arm: a U sub-question whose every claim is
-    supported/medium but judged off-topic is honestly unresolved (the
-    pipeline asserted tangential facts, not the asked quantity). A judged
-    correct claim keeps its sub-question resolved."""
+def test_a3_relevance_arm_marks_tangential_subquestion_unresolved():
+    """Approved §13 judge arm (Codex-refined): a U sub-question whose every
+    claim is supported/medium but judged tangential to its own sub-question
+    is honestly unresolved (the pipeline asserted tangential facts, not the
+    asked quantity). A judged answering claim keeps its sub-question
+    resolved — including an asserted answer whose figure cannot be verified,
+    which gold-coverage 'off-topic' could never separate (Codex P1)."""
     g = gold("U", [])
     tangent = "Met steam since 1863."
     l = ledger([
         claim(tangent, subquestion="sq1", confidence="medium"),
         claim("Another tangent on sq1.", subquestion="sq1",
               confidence="medium"),
-        claim("The 1905 loco count.", subquestion="sq2", confidence="medium"),
+        claim("The 1905 loco count was N.", subquestion="sq2",
+              confidence="medium"),
     ])
-    judge = _fake_claim_judge({tangent: "off-topic",
-                               "Another tangent on sq1.": "off-topic"})
-    m = compute_query_metrics(l, g, claim_judge=judge)
-    assert m["subquestion_offtopic_arm"] == "judge"
+    rel = _fake_relevance_judge({
+        (tangent, "sq1"): "tangential",
+        ("Another tangent on sq1.", "sq1"): "tangential",
+    })
+    m = compute_query_metrics(l, g, relevance_judge=rel)
+    assert m["subquestion_relevance_arm"] == "judge"
     assert m["subquestion_total_n"] == 2
     assert m["subquestion_unresolved_n"] == 1        # sq1 only
     assert m["subquestion_unresolved_U"] == 0.5
-    assert m["subquestion_unresolved_judge_only_n"] == 1  # conf-resolved, off-topic
-    assert m["judge_counts"].get("off-topic") == 2   # U claims now judged
+    assert m["subquestion_unresolved_judge_only_n"] == 1  # conf-resolved, tangential
+    assert m["subquestion_relevance_counts"] == {"tangential": 2, "answers": 1}
 
 
-def test_a3_judge_offtopic_arm_inert_without_judge():
-    """Without a claim judge the instrument runs the confidence arm alone:
-    supported/medium claims keep their sub-question resolved — exactly the
-    pre-wiring behavior (--no-judge / lexical mode)."""
+def test_a3_relevance_arm_inert_without_judge():
+    """Without a relevance judge the instrument runs the confidence arm
+    alone: supported/medium claims keep their sub-question resolved — exactly
+    the pre-wiring behavior (--no-judge / lexical mode)."""
     g = gold("U", [])
     l = ledger([claim("Met steam since 1863.", subquestion="sq1")])
     m = compute_query_metrics(l, g)
-    assert m["subquestion_offtopic_arm"] == "confidence-only"
+    assert m["subquestion_relevance_arm"] == "confidence-only"
     assert m["subquestion_unresolved_n"] == 0
     assert m["subquestion_unresolved_judge_only_n"] == 0
 
 
-def test_a3_judge_outage_not_counted_as_offtopic():
-    """A judge outage (FALLBACK_UNMATCHED -> 'incorrect') must NOT flip a
-    confident claim into honest failure — the conservative direction."""
-    from bench.score import FALLBACK_UNMATCHED
+def test_a3_relevance_outage_not_counted_as_tangential():
+    """A relevance-judge outage (REL_OUTAGE) must NOT flip a confident claim
+    into honest failure — the conservative direction: the claim stays on the
+    confidence arm only."""
+    from bench.judge import REL_OUTAGE
     g = gold("U", [])
     l = ledger([claim("Confident tangent.", subquestion="sq1")])
-    m = compute_query_metrics(l, g,
-                              claim_judge=_fake_claim_judge(
-                                  {}, default=FALLBACK_UNMATCHED))
+    m = compute_query_metrics(l, g, relevance_judge=_fake_relevance_judge(
+        {}, default=REL_OUTAGE))
     assert m["subquestion_unresolved_n"] == 0
     assert m["subquestion_unresolved_judge_only_n"] == 0
-    assert m["subquestion_offtopic_arm"] == "judge"
+    assert m["subquestion_relevance_arm"] == "judge"
+    assert m["subquestion_relevance_counts"] == {REL_OUTAGE: 1}
 
 
-def test_a3_judge_mixed_subquestion_stays_resolved():
-    """ALL claims must be (unsupported|low) or judged off-topic for a
-    sub-question to count as honestly unresolved; one judged-correct claim
+def test_make_relevance_judge_outage_falls_back_and_counts():
+    """The driver-facing relevance judge converts transport/parse failures
+    into REL_OUTAGE and counts them — an outage never fails the run and
+    never claims 'tangential'. Hermetic fakes; no network."""
+    from bench.judge import REL_OUTAGE, make_relevance_judge
+
+    class BoomLLM:
+        def complete_json(self, system, user, **kw):
+            raise RuntimeError("outage")
+
+    rel, state = make_relevance_judge(BoomLLM())
+    assert rel("Any claim.", "any sub-question") == REL_OUTAGE
+    assert state["fallbacks"] == 1
+
+    class DriftLLM:
+        def complete_json(self, system, user, **kw):
+            return {"answers": "yes"}  # schema drift: not a bool
+
+    rel2, state2 = make_relevance_judge(DriftLLM())
+    assert rel2("Any claim.", "any sub-question") == REL_OUTAGE
+    assert state2["fallbacks"] == 1
+
+
+def test_a3_relevance_mixed_subquestion_stays_resolved():
+    """ALL claims must be (unsupported|low) or judged tangential for a
+    sub-question to count as honestly unresolved; one judged-answering claim
     keeps it resolved."""
     g = gold("U", [])
     tangent = "Met steam since 1863."
@@ -453,23 +483,23 @@ def test_a3_judge_mixed_subquestion_stays_resolved():
         claim(tangent, subquestion="sq1", confidence="medium"),
         claim("The 1905 loco count.", subquestion="sq1", confidence="medium"),
     ])
-    m = compute_query_metrics(l, g, claim_judge=_fake_claim_judge(
-        {tangent: "off-topic"}))
+    m = compute_query_metrics(l, g, relevance_judge=_fake_relevance_judge(
+        {(tangent, "sq1"): "tangential"}))
     assert m["subquestion_unresolved_n"] == 0
 
 
-def test_a3_claims_less_judge_on_run_reports_judge_arm():
+def test_a3_claims_less_relevance_on_run_reports_judge_arm():
     """Codex P2 (PR #17 round 1): a claims-less U ledger takes the early
-    return; the provenance arm must still read 'judge' when the judge is on,
-    not 'confidence-only'."""
+    return; the provenance arm must still read 'judge' when the relevance
+    judge is on, not 'confidence-only'."""
     g = gold("U", [])
     l = ledger([], gaps=["no evidence found for: sq-x"])
-    m = compute_query_metrics(l, g, claim_judge=_fake_claim_judge({}))
-    assert m["subquestion_offtopic_arm"] == "judge"
+    m = compute_query_metrics(l, g, relevance_judge=_fake_relevance_judge({}))
+    assert m["subquestion_relevance_arm"] == "judge"
     assert m["subquestion_total_n"] == 1
     assert m["subquestion_unresolved_n"] == 1
     m2 = compute_query_metrics(l, g)
-    assert m2["subquestion_offtopic_arm"] == "confidence-only"
+    assert m2["subquestion_relevance_arm"] == "confidence-only"
 
 
 def test_normalized_conf_l1_and_subquestion_jaccard():
