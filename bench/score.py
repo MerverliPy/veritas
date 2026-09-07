@@ -575,14 +575,19 @@ def reliability(claims: list[dict], gold: dict,
 
 
 def compute_query_metrics(ledger: dict, gold: dict | None,
-                          claim_judge=None) -> dict:
+                          claim_judge=None, relevance_judge=None) -> dict:
     """Metrics for one query run (spec §5). Gold-less runs report structure
     only; every *_n field is 0 and pass-relevant values are None.
 
     ``claim_judge`` (optional) labels each claim against gold facts
     (bench/judge.py) for precision/calibration — the lexical matcher cannot
     credit the pipeline's generative claims. When absent, lexical
-    ``gold_verdict`` is used. Recall stays lexical in both cases."""
+    ``gold_verdict`` is used. Recall stays lexical in both cases.
+
+    ``relevance_judge`` (optional) judges answer-relevance between a U claim
+    and its own sub-question (no gold involved) — the A3 honest-failure arm
+    (see bench/judge.py: gold coverage must not stand in for answer
+    relevance). Consumed only on U queries."""
     claims = ledger.get("claims", [])
     cls = query_class(gold)
     m: dict = {
@@ -633,8 +638,13 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
     if gold is None or not claims:
         # A claims-less U ledger still registers gap-named sub-questions as
         # honestly unresolved (re-spec A3) — the pipeline admitted failure.
+        # Pass an EMPTY label map (not None) when the relevance judge is on
+        # so subquestion_relevance_arm stays truthful for these runs too
+        # (Codex P2, PR #17 round 1); with no claims there is nothing to
+        # label, so the map is safe.
         if cls == "U" and gold is not None:
-            _subquestion_honest_failure(m, ledger)
+            _subquestion_honest_failure(
+                m, ledger, {} if relevance_judge is not None else None)
         return m
 
     expected = gold.get("expected_claims", [])
@@ -716,7 +726,35 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
         m["fabrication_U"] = sum(
             1 for c in asserted
             if c["verdict"] == "supported" and c["confidence"] == "high")
-        _subquestion_honest_failure(m, ledger)
+        # Re-spec A3 judge arm (§13 owner-approved; refined per Codex P1, PR
+        # #17 round 2): the honest-failure arm judges ANSWER-RELEVANCE between
+        # each U claim and its own sub-question (make_relevance_judge) — NOT
+        # gold coverage. U gold sheets deliberately omit the requested answer,
+        # so the gold judge's 'off-topic' would also label a confidently
+        # asserted (possibly invented) answer; counting that as honest failure
+        # would credit the worst U failure mode. A claim judged 'tangential'
+        # did not state the asked quantity. Outage (REL_OUTAGE) never counts
+        # as tangential — conservative. Memoized per (statement, subquestion);
+        # label counts recorded for provenance.
+        rel_labels: dict[tuple[str, str], str] | None = None
+        rel_counts: dict[str, int] = {}
+        if relevance_judge is not None:
+            rel_labels = {}
+            for c in asserted:
+                # Confidence arm already decides for low/unsupported claims
+                # (they can never be the confident tangent the arm looks
+                # for) — spend the paid judge only where its label matters
+                # (Codex P2, PR #17 round 3; the cap is a real constraint).
+                if c.get("confidence") in ("low", "unsupported"):
+                    continue
+                key = (c["statement"], (c.get("subquestion") or "").strip())
+                if key not in rel_labels:
+                    label = relevance_judge(*key)
+                    rel_labels[key] = label
+                    rel_counts[label] = rel_counts.get(label, 0) + 1
+        if rel_counts:
+            m["subquestion_relevance_counts"] = rel_counts
+        _subquestion_honest_failure(m, ledger, rel_labels)
     if cls == "D":
         # conflict pairs recorded on claims (ledger keeps report-level
         # conflicts inside claim.conflicts when reconciled) or as top-level.
@@ -725,17 +763,25 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
     return m
 
 
-def _subquestion_honest_failure(m: dict, ledger: dict) -> None:
+def _subquestion_honest_failure(m: dict, ledger: dict,
+                                relevance: dict[tuple[str, str], str] | None
+                                = None) -> None:
     """Re-spec A3: honest failure at SUB-QUESTION level. A U sub-question is
     honestly unresolved when every claim attached to it is (unsupported|low)
-    — the pipeline did not confidently assert the asked quantity — or it
-    produced no claims and is named in a gap (runner emits 'no evidence found
-    for: <sub.text>'). The universe is the recoverable one: sub-questions that
-    produced claims (their text rides on each claim) plus gap-named ones.
-    Judge off-topic labeling of U claims is the documented optional
-    refinement (U claims are not judged today); until then confidence
-    low/unsupported is the signal. Mutates ``m`` in place; safe for
-    claims-less U ledgers (gap-named sub-questions still register)."""
+    — the pipeline did not confidently assert the asked quantity — or judged
+    'tangential' by the answer-relevance judge (bench/judge.py
+    make_relevance_judge: a supported/medium claim that does not state the
+    asked quantity is a confident tangential assertion, not an answer), or
+    it produced no claims and is named in a gap (runner emits 'no evidence
+    found for: <sub.text>'). The universe is the recoverable one:
+    sub-questions that produced claims (their text rides on each claim) plus
+    gap-named ones. Relevance-outage labels (REL_OUTAGE) do NOT count as
+    tangential — an unjudged claim stays on the confidence arm only, the
+    conservative direction for the gate. ``relevance`` is None when the
+    judge is off (--no-judge / lexical mode): the instrument then runs on
+    the confidence arm alone, exactly the pre-wiring behavior. Mutates
+    ``m`` in place; safe for claims-less U ledgers (gap-named sub-questions
+    still register)."""
     claims = ledger.get("claims", [])
     by_sq: dict[str, list[dict]] = {}
     for c in claims:
@@ -744,18 +790,33 @@ def _subquestion_honest_failure(m: dict, ledger: dict) -> None:
     gap_named = _gap_named_subquestions(ledger)
     names = set(by_sq) | {g for g in gap_named if g}
     unresolved = 0
+    judge_only = 0
     for name in names:
         cs = by_sq.get(name, [])
         if not cs:
             unresolved += 1            # zero claims, gap-named
-        elif all(c.get("confidence") in ("low", "unsupported")
-                 for c in cs):
-            unresolved += 1
+        else:
+            conf_resolved = any(c.get("confidence") not in ("low", "unsupported")
+                                for c in cs)
+            off = all(c.get("confidence") in ("low", "unsupported")
+                      or (relevance or {}).get(
+                          (c["statement"], name)) == "tangential"
+                      for c in cs)
+            if off:
+                unresolved += 1
+                # Provenance: a sub-question unresolved ONLY because the
+                # relevance arm labeled its confident claims tangential would
+                # have read 'resolved' under the confidence-only instrument.
+                if conf_resolved and relevance is not None:
+                    judge_only += 1
     total = len(names)
     m["subquestion_unresolved_n"] = unresolved
     m["subquestion_total_n"] = total
     m["subquestion_unresolved_U"] = (unresolved / total if total
                                       else None)
+    m["subquestion_unresolved_judge_only_n"] = judge_only
+    m["subquestion_relevance_arm"] = ("judge" if relevance is not None
+                                      else "confidence-only")
 
 
 def _counts(items: list[dict], key: str) -> dict:
@@ -900,7 +961,10 @@ def gates(q_metrics: list[dict], *,
       at >= 0.05 so a working cross-check pass is observable.
     - A3 measures U honest failure at SUB-QUESTION level: a sub-question is
       honestly unresolved when every claim attached is (unsupported|low) or
-      it produced no claims and appears in a gap; gate >= 0.6 of U
+      judged 'tangential' by the answer-relevance judge (approved §13 judge
+      arm, refined per Codex P1: answer-relevance vs the sub-question text,
+      not gold coverage; confidence-only when the judge is off), or it
+      produced no claims and appears in a gap; gate >= 0.6 of U
       sub-questions.
     - A4 evaluates ONLY on same-query paired arms (>= 2 paired queries,
       matched by query_id): (a) contradiction fires on >= half the paired D
@@ -971,6 +1035,8 @@ def gates(q_metrics: list[dict], *,
              and m.get("subquestion_total_n")]
     unres_n = sum(m.get("subquestion_unresolved_n", 0) for m in u_sub)
     total_n = sum(m.get("subquestion_total_n", 0) for m in u_sub)
+    judge_only_n = sum(m.get("subquestion_unresolved_judge_only_n", 0)
+                       for m in u_sub)
     u_share = (unres_n / total_n) if total_n else None
     # claim-level share stays informational alongside the sub-question metric
     u_cl = [m for m in q_metrics if m.get("class") == "U"
@@ -1108,9 +1174,13 @@ def gates(q_metrics: list[dict], *,
             "value": {"honest_unresolved_U_subquestions": u_share,
                       "n_subquestions_total": total_n,
                       "n_subquestions_unresolved": unres_n,
+                      "n_unresolved_judge_only": judge_only_n,
                       "unsupported_share_U_claim_level": cl_share},
             "detail": "sub-question level: needs U sub-questions; "
-                       ">= 0.6 honestly unresolved",
+                       ">= 0.6 honestly unresolved; unresolved = all claims "
+                       "(unsupported|low) or judged tangential to their "
+                       "sub-question (relevance judge; confidence-only arm "
+                       "when judge off)",
         },
         "A4_crosscheck_benefit": {
             "ok": a4_ok,

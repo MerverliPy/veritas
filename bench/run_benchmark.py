@@ -43,7 +43,7 @@ sys.path.insert(0, str(REPO))  # allow running from anywhere
 # semantics change; recorded in scorecard provenance so A4 never pairs a
 # main arm scored under one scorer revision with a paired arm scored under
 # another (judge-vs-lexical mode is already checked separately).
-SCORER_REVISION = "r1-gate-respec-3"
+SCORER_REVISION = "r1-gate-respec-4"  # respec-4: A3 relevance-judge arm
 
 from bench.score import (  # noqa: E402
     CLASSES,
@@ -414,7 +414,7 @@ def _assess(q: dict, qtext: str, qout: Path, gold_dir: Path,
     cost stays visible and separate from the mission's own llm.log when
     requested (rescore uses a dedicated llm-rescore.log; the execute path
     passes the mission llm.log after the child has appended to it)."""
-    from bench.judge import make_claim_judge
+    from bench.judge import make_claim_judge, make_relevance_judge
     from veritas.llm import DeepSeekClient
 
     entry: dict = {"id": q["id"], "class": q.get("class"), "query": qtext,
@@ -423,6 +423,8 @@ def _assess(q: dict, qtext: str, qout: Path, gold_dir: Path,
     gold = load_json(gold_path) if gold_path.exists() else None
     claim_judge = None
     judge_state = None
+    rel_judge = None
+    rel_state = None
     try:
         ledger = load_json(qout / "ledger.json")
     except Exception as e:  # noqa: BLE001
@@ -432,13 +434,17 @@ def _assess(q: dict, qtext: str, qout: Path, gold_dir: Path,
         if judge_enabled and gold:
             claim_judge, judge_state = make_claim_judge(
                 DeepSeekClient(log=str(judge_log)))
+            rel_judge, rel_state = make_relevance_judge(
+                DeepSeekClient(log=str(judge_log)))
         try:
             entry["metrics"] = compute_query_metrics(
-                ledger, gold, claim_judge=claim_judge)
+                ledger, gold, claim_judge=claim_judge,
+                relevance_judge=rel_judge)
         except Exception as e:  # noqa: BLE001
             entry["ok"] = False
             entry["error"] = f"score parse failed: {e}"
         entry["judge_fallbacks"] = judge_state["fallbacks"] if judge_state else 0
+        entry["relevance_fallbacks"] = rel_state["fallbacks"] if rel_state else 0
         entry["judge_mode"] = ("judge" if judge_state else
                                "lexical" if gold is not None else "no-gold")
         if gold is None:
@@ -857,6 +863,8 @@ def main() -> int:
         gold = load_json(gold_path) if gold_path.exists() else None
         claim_judge = None
         judge_state = None
+        rel_judge = None
+        rel_state = None
         if proc.returncode != 0:
             entry["error"] = (proc.stderr or proc.stdout)[-500:]
         else:
@@ -869,21 +877,29 @@ def main() -> int:
                 if judge_enabled and gold:
                     # Judge each claim against the gold facts (temp 0, same
                     # backend); transport failures fall back to the lexical
-                    # matcher per claim and are counted.
-                    from bench.judge import make_claim_judge
+                    # matcher per claim and are counted. A second judge
+                    # scores U-claim answer-relevance against its own
+                    # sub-question (A3 honest-failure arm).
+                    from bench.judge import make_claim_judge, \
+                        make_relevance_judge
                     from veritas.llm import DeepSeekClient
 
                     claim_judge, judge_state = make_claim_judge(
                         DeepSeekClient(log=str(llm_log)))
+                    rel_judge, rel_state = make_relevance_judge(
+                        DeepSeekClient(log=str(llm_log)))
 
                 try:
                     entry["metrics"] = compute_query_metrics(
-                        ledger, gold, claim_judge=claim_judge)
+                        ledger, gold, claim_judge=claim_judge,
+                        relevance_judge=rel_judge)
                 except Exception as e:  # noqa: BLE001
                     entry["ok"] = False
                     entry["error"] = f"score parse failed: {e}"
                 entry["judge_fallbacks"] = (
                     judge_state["fallbacks"] if judge_state else 0)
+                entry["relevance_fallbacks"] = (
+                    rel_state["fallbacks"] if rel_state else 0)
                 entry["judge_mode"] = (
                     "judge" if judge_state else
                     "lexical" if gold is not None else "no-gold")
