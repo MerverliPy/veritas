@@ -369,3 +369,42 @@ def test_claims_are_deduped_across_subquestions(tmp_path: Path):
     report = runner.run(Query("t", surfaces=[Surface.LOCAL]))
     assert len(report.claims) == 1
     assert report.claims[0].id == "c1"
+
+
+def test_verification_failure_is_degraded_and_order_is_preserved(tmp_path: Path,
+                                                                  monkeypatch):
+    import time
+    import veritas.pipeline.runner as runner_mod
+
+    notes = make_notes(tmp_path)
+    plan = json.dumps({"overview": "x", "subquestions": [
+        {"text": "AlphaNote and BetaNote facts", "rationale": "r"}],
+        "crosscheck_seed_note": "n/a"})
+    claims = json.dumps({"claims": [
+        {"statement": "AlphaNote processes JSON files nightly.", "evidence_idx": [1]},
+        {"statement": "BetaNote is unmaintained since 2023.", "evidence_idx": [1]},
+    ], "noted_gaps": []})
+    llm = scripted_llm(plan=plan, claims=claims)
+
+    def flaky_verify(llm_, claim, providers):
+        if claim.statement.startswith("AlphaNote"):
+            time.sleep(0.02)
+            claim.verdict = Verdict.SUPPORTED
+            claim.confidence = "medium"
+            return claim
+        raise RuntimeError("transient verifier failure")
+
+    monkeypatch.setattr(runner_mod, "_verify_one", flaky_verify)
+    runner = Runner(llm=llm,
+                    providers=build_providers([Surface.LOCAL], local_root=notes),
+                    enable_crosscheck=False, outdir=tmp_path / "order")
+    report = runner.run(Query("facts", surfaces=[Surface.LOCAL]))
+
+    assert [c.statement for c in report.claims] == [
+        "AlphaNote processes JSON files nightly.",
+        "BetaNote is unmaintained since 2023.",
+    ]
+    assert report.claims[0].verdict is Verdict.SUPPORTED
+    assert report.claims[1].verdict is Verdict.UNSUPPORTED
+    assert report.claims[1].confidence == "unsupported"
+    assert "verification failed" in report.claims[1].note

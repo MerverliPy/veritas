@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from copy import copy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -124,14 +125,22 @@ class Runner:
         # ---- 4. verify each claim
         provider_by_surface = {p.surface: p for p in _fresh_providers(query)} \
             if not self.providers else {p.surface: p for p in self.providers}
-        verified: list[Claim] = []
+        verified_results: list[Claim | None] = [None] * len(all_claims)
         with ThreadPoolExecutor(max_workers=4) as pool:
             futs = {}
-            for c in all_claims:
-                futs[pool.submit(_verify_one, self.llm, c, provider_by_surface)] = c
+            for index, c in enumerate(all_claims):
+                futs[pool.submit(_verify_one, self.llm, c, provider_by_surface)] = (index, c)
             for fut in as_completed(futs):
-                claim = fut.result()
-                verified.append(claim)
+                index, original = futs[fut]
+                try:
+                    verified_results[index] = fut.result()
+                except Exception as e:
+                    failed = copy(original)
+                    failed.verdict = Verdict.UNSUPPORTED
+                    failed.confidence = "unsupported"
+                    failed.note = f"verification failed: {type(e).__name__}: {e}"
+                    verified_results[index] = failed
+        verified = [c for c in verified_results if c is not None]
         self.log(f"verified: {len(verified)} claims — "
                  f"supported {sum(1 for c in verified if c.verdict is Verdict.SUPPORTED)}, "
                  f"partial {sum(1 for c in verified if c.verdict is Verdict.PARTIAL)}, "

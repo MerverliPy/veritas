@@ -43,10 +43,13 @@ def verify_claim(
     provider_by_surface: dict,
 ) -> Claim:
     """Return a copy of the claim with verdict/confidence set."""
+    original = claim.statement
+    refetched_any = False
     judge_input: list[str] = [f"CLAIM: {claim.statement}"]
     for i, ev in enumerate(claim.evidence, start=1):
         full, ok = _refetch(provider_by_surface, ev.source)
         if ok:
+            refetched_any = True
             judge_input.append(
                 f"\nSOURCE [{i}] {ev.source.title} — {ev.source.locator()} (refetched):\n{full}"
             )
@@ -77,7 +80,8 @@ def verify_claim(
     elif verdict is Verdict.PARTIAL:
         claim.confidence = "low"
         if better:
-            claim.note = f"{reason} Corrected statement: {better}"
+            claim.statement = better
+            claim.note = f"{reason} Original statement: {original}"
     elif verdict is Verdict.CONTRADICTED:
         claim.confidence = "low"
         if better:
@@ -86,6 +90,9 @@ def verify_claim(
         claim.confidence = "unsupported"
         if not reason:
             claim.note = "no retrievable evidence supports or refutes this claim"
+    if claim.evidence and not refetched_any:
+        claim.note += (" (all source refetches failed; verdict judged on quoted "
+                       "passages only)")
     return claim
 
 

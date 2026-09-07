@@ -100,6 +100,7 @@ class _FileEngine:
     def __init__(self, root: Path, mode: str) -> None:
         self.root = root.resolve()
         self.mode = mode
+        self.warnings: list[str] = []
 
     def candidate_files(self) -> list[Path]:
         if self.mode == "code":
@@ -151,7 +152,14 @@ class _FileEngine:
     def fetch(self, source: Source) -> str | None:
         if not source.path:
             return None
-        path = (self.root / source.path).resolve()
+        requested = Path(source.path)
+        if requested.is_absolute():
+            self.warnings.append(f"rejected absolute path outside root: {source.path}")
+            return None
+        path = (self.root / requested).resolve()
+        if not path.is_relative_to(self.root):
+            self.warnings.append(f"rejected path outside root: {source.path}")
+            return None
         if not path.is_file():
             # tolerate locators with #L already stripped by caller, else try suffix match
             return None
@@ -264,7 +272,10 @@ class LocalProvider(Provider):
         return self._engine.search(query, limit)
 
     def fetch(self, source: Source) -> str | None:
-        return self._engine.fetch(source)
+        text = self._engine.fetch(source)
+        self.warnings.extend(self._engine.warnings)
+        self._engine.warnings.clear()
+        return text
 
 
 class CodeProvider(Provider):
@@ -278,7 +289,10 @@ class CodeProvider(Provider):
         return self._engine.search(query, limit)
 
     def fetch(self, source: Source) -> str | None:
-        return self._engine.fetch(source)
+        text = self._engine.fetch(source)
+        self.warnings.extend(self._engine.warnings)
+        self._engine.warnings.clear()
+        return text
 
     def overview(self) -> str:
         return self._engine.overview()
