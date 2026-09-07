@@ -1,5 +1,9 @@
 # veritas
 
+[![CI](https://github.com/MerverliPy/veritas/actions/workflows/ci.yml/badge.svg)](https://github.com/MerverliPy/veritas/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+
 <p align="center"><img src="assets/veritas-hero.jpg" alt="Decorative abstract illustration: source fragments pass through transparent checkpoints into a ledger and report; unresolved strands diverge in amber and gray. Illustrative only — not a diagram of the pipeline." width="720"></p>
 
 **Evidence-bound research pipeline** — deterministic multi-role orchestration
@@ -8,6 +12,19 @@ claim is bound to retrievable evidence and verified against re-fetched source
 text; orchestration is deterministic, while LLM outputs and fetched web
 evidence are not. Independent cross-checking runs by default (disable it with
 `--no-crosscheck`); uncertainty is stated, never hidden.
+
+**Contents:** [How it works](#how-it-works) · [Install & configure](#install--configure) · [Usage](#usage) · [Output anatomy](#output-anatomy-v01--illustrative-not-a-benchmark) · [Reliability design](#reliability-design-the-short-version) · [Development](#development) · [License](#license)
+
+## How it works
+
+When you ask a question, `veritas` breaks it into sub-questions and a team of
+specialized roles gathers evidence from the sources you chose. Every claim the
+team makes must cite numbered evidence, and each claim is then checked against
+the **actual source text** — re-fetched fresh, not trusted from memory. An
+independent second research pass cross-checks the results, and whatever the
+evidence cannot establish is reported as *Not established* rather than
+papered over. You get a readable `report.md` plus a machine-readable
+`ledger.json` of every claim and its evidence.
 
 ```mermaid
 flowchart LR
@@ -39,9 +56,15 @@ Text fallback: plan → research → claims → verify → cross-check (optional
 ## Install & configure
 
 ```bash
-git init . && cp .env.example .env   # then add DEEPSEEK_API_KEY (DeepSeek API)
-pip install -e .                     # or: run via  python -m veritas.cli
+git clone https://github.com/MerverliPy/veritas
+cd veritas
+cp .env.example .env   # then add DEEPSEEK_API_KEY (DeepSeek API)
+pip install -e .       # or: run via  python -m veritas.cli
 ```
+
+Prefer not to clone? `pip install git+https://github.com/MerverliPy/veritas.git`
+works too — just set `DEEPSEEK_API_KEY` in your environment (or a `.env` in
+your working directory) instead of copying `.env.example`.
 
 No paid search key is required — web research uses keyless engines
 (DuckDuckGo, Wikipedia, arXiv, Hacker News, GitHub). Set `TAVILY_API_KEY`
@@ -75,6 +98,9 @@ Every run writes two artifacts to `--outdir` (default `./out`):
 
 Sample regenerated 2026-09-05 via `veritas run "Why did the WannaCry ransomware worm spread so fast in May 2017?" --surfaces web --outdir out/canonical` (deepseek-chat backend). Verbatim title and Answer text from the generated report; illustrative format only — not a quality benchmark.
 
+<details>
+<summary>Full sample report (verbatim, illustrative)</summary>
+
 ```text
 # Research report: Why did the WannaCry ransomware worm spread so fast in May 2017?
 
@@ -105,6 +131,8 @@ The primary reason for the worm's success was the vast number of vulnerable, unp
 
 The provided evidence confirms that WannaCry's spread was modeled using an epidemic spread metric (R0), which is used to measure how quickly an infection spreads through a population [MEDIUM]. This modeling underscores the network-level, self-propagating nature of the attack. However, the specific effects of network congestion, SMB port filtering, and ISP-level throttling or blocking on propagation speed in different regions and sectors are not detailed in the available evidence.
 ```
+
+</details>
 
 *Annotation:* The report also contains per-claim verified statements with numbered sources, a Gaps noted during research list, a Conflicts in the evidence section (semantic contradiction detection), and a cross-check summary (independent claims produced: 3; corroborated primary claims: 0; final distribution: medium=20). The annotation is not part of the verbatim report.
 
@@ -151,3 +179,7 @@ responses, useful for a no-key demo of the report shape. Set
 
 See `docs/DESIGN.md` for the full architecture, role contracts, and the
 threats each stage defends against.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
