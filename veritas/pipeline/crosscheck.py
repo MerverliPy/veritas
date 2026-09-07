@@ -114,6 +114,14 @@ def run_crosscheck(
     plan = make_crosscheck_plan(llm, query, seed_note,
                                 primary_subquestions=primary_subquestions,
                                 primary_claims=primary_claims)
+    # Source diversification (A2 diagnostic): if the independent pass reads
+    # the SAME pages the primary pass cited, every agreement is same-source —
+    # crosschecked but never promotable to high (sem_same_sources/starved
+    # promotions in the pilot breakdown). Bias the evidence ordering toward
+    # locators the primary did not cite; same-source evidence is kept as
+    # fallback (stable sort), so yield never drops to zero.
+    primary_locators = {e.source.locator() for c in original_primary
+                        for e in c.evidence}
     cross_claims: list[Claim] = []
     gaps: list[str] = []
     for sub in plan.subquestions[:subquestion_limit]:
@@ -121,6 +129,7 @@ def run_crosscheck(
             llm, providers, sub.text, limit=evidence_limit, fetch_top=2)
         if not evidence:
             continue
+        evidence.sort(key=lambda e: e.source.locator() in primary_locators)
         notes = researcher_notes(llm, sub.text, evidence)
         claims, g = extract_claims(llm, sub.text, evidence, researcher=notes)
         cross_claims.extend(claims)
@@ -143,7 +152,6 @@ def run_crosscheck(
 
     summary = reconcile(primary, cross_claims, plan.overview, gaps)
     candidates: list[Claim] = summary.pop("candidates", [])
-
     # Semantic corroboration: a VERIFIED-supported independent claim may
     # corroborate a primary claim whose paraphrase the token matcher missed.
     # Promotion to high still needs a different source locator (schema
@@ -159,8 +167,11 @@ def run_crosscheck(
     # corroborate_from_semantic (Codex round-4 P2).
     eligible_primary = [c for c in original_primary
                         if c.verdict is Verdict.SUPPORTED]
+    breakdown = summary.setdefault("breakdown", {})
+    breakdown["sem_eligible_cross"] = len(eligible_cross)
+    breakdown["sem_eligible_primary"] = len(eligible_primary)
     sem_flags, sem_promos, sem_pairs = corroborate_from_semantic(
-        llm, eligible_primary, eligible_cross)
+        llm, eligible_primary, eligible_cross, breakdown)
     consumed = {id(xc) for _pc, xc in sem_pairs}
     # consumed cross claims are NOT lost: corroborate_from_semantic already
     # adopted each donor's evidence onto its matched primary above
@@ -211,9 +222,11 @@ def reconcile(
     primary). Non-matching claims become ``candidates`` too."""
     matched_primary: set[str] = set()
     candidates: list[Claim] = []
+    breakdown: Counter[str] = Counter()
     for xc in cross:
         xt = _sig_tokens(xc.statement)
         if not xt:
+            breakdown["no_tokens"] += 1
             candidates.append(xc)
             continue
         best: tuple[float, Claim | None] = (0.0, None)
@@ -235,6 +248,7 @@ def reconcile(
             # leaves appended reaches detect_contradictions with the primary
             # (Codex round-7/8 P1).
             if _norm(xc.statement) != _norm(pc.statement):
+                breakdown["not_verbatim"] += 1
                 candidates.append(xc)
                 continue
             # only a VERIFIED-SUPPORTED donor may corroborate: a lexical echo
@@ -242,7 +256,9 @@ def reconcile(
             # without marking the primary — it must never set crosschecked or
             # drive a high promotion (Codex round-4 P1)
             if xc.verdict is not Verdict.SUPPORTED:
+                breakdown["echo_not_supported"] += 1
                 continue
+            breakdown["matched_lexical"] += 1
             matched_primary.add(pc.id)
             pc.crosschecked = True
             if pc.verdict is Verdict.SUPPORTED and pc.confidence == "medium":
@@ -257,11 +273,19 @@ def reconcile(
                 # cross {A} is subset agreement, not independent evidence
                 if pc_locs and (xc_locs - pc_locs):
                     pc.confidence = "high"
+                elif not (xc_locs - pc_locs):
+                    # donor had no source locator the primary lacks: the two
+                    # passes pooled the same sources (corroboration yield
+                    # diagnostic — see ROADMAP A2)
+                    breakdown["matched_same_sources"] += 1
+                else:
+                    breakdown["matched_no_promotion"] += 1
             # donor passed verify_claim as supported, so its new-source
             # evidence is adopted — the promoted claim keeps the independent
             # source that justified it in the report/ledger
             _adopt_evidence(pc, xc)
         else:
+            breakdown["below_threshold"] += 1
             candidates.append(xc)
 
     return {
@@ -271,6 +295,7 @@ def reconcile(
         "candidates": candidates,
         "cross_gaps": cross_gaps or [],
         "confidence_counts": dict(Counter(c.confidence for c in primary)),
+        "breakdown": dict(breakdown),
     }
 
 
@@ -278,6 +303,7 @@ def semantic_corroborate(
     llm: BaseLLM,
     primary: list[Claim],
     cross: list[Claim],
+    breakdown: dict | None = None,
 ) -> list[tuple[Claim, Claim]]:
     """One LLM pass proposes same-fact (cross -> primary) pairs the token
     matcher missed because generative phrasing restates a fact in different
@@ -290,19 +316,45 @@ def semantic_corroborate(
     alone (conservative fallback, never a mission failure)."""
     if not primary or not cross:
         return []
+    # Deterministic similarity hints: for each cross claim, rank primaries by
+    # token overlap and annotate the top-k so the model's attention lands on
+    # plausible pairs instead of scanning a long numbered list (A2 yield
+    # diagnostic: an un-annotated 18x51 list produced only 3 matches).
+    # Advisory only — the model may match a pair with zero token overlap;
+    # returned pairs are still validated by index.
+    def _hints() -> str:
+        lines = []
+        for i, xc in enumerate(cross, start=1):
+            xt = _sig_tokens(xc.statement)
+            ranked = sorted(
+                (( _jaccard(xt, _sig_tokens(pc.statement)), j)
+                 for j, pc in enumerate(primary, start=1)),
+                key=lambda t: (-t[0], t[1]))
+            near = [str(j) for sim, j in ranked[:5] if sim > 0.0]
+            suffix = (f"\n    token-similar primaries: [{'], ['.join(near)}]"
+                      if near else "")
+            lines.append(f"[{i}] {xc.statement}{suffix}")
+        return "\n".join(lines)
+
     user = (
         "Primary claims (verified):\n"
         + "\n".join(f"[{i}] {c.statement}"
                      for i, c in enumerate(primary, start=1))
-        + "\n\nIndependent-pass claims (verified):\n"
-        + "\n".join(f"[{i}] {c.statement}"
-                     for i, c in enumerate(cross, start=1))
+        + "\n\nIndependent-pass claims (verified), each annotated with its "
+          "token-similar primary candidates (advisory only — judge by "
+          "meaning, not by shared words):\n"
+        + "\n" + _hints()
         + "\n\nReturn same_fact_pairs [cross_index, primary_index] for "
           "claims that state the same fact."
     )
     try:
         data = llm.complete_json(CORROBORATOR_SYSTEM, user)
     except Exception:
+        if breakdown is not None:
+            # distinguishable from 'the model found no pairs' — a silently
+            # failing semantic pass looks identical to zero yield (A2
+            # diagnostic, ROADMAP)
+            breakdown["sem_llm_failed"] = breakdown.get("sem_llm_failed", 0) + 1
         return []
     out: list[tuple[Claim, Claim]] = []
     used_cross: set[int] = set()
@@ -331,6 +383,7 @@ def corroborate_from_semantic(
     llm: BaseLLM,
     primary: list[Claim],
     cross: list[Claim],
+    breakdown: dict | None = None,
 ) -> tuple[int, int, list[tuple[Claim, Claim]]]:
     """Run the semantic same-fact pass and apply it in place.
 
@@ -344,7 +397,7 @@ def corroborate_from_semantic(
     cross claims agreeing with one primary count as one corroboration.
     Returns (n_corroborated, n_promoted, pairs) so the caller can exclude
     matched cross claims from the appended-candidates list."""
-    pairs = semantic_corroborate(llm, primary, cross)
+    pairs = semantic_corroborate(llm, primary, cross, breakdown)
     corroborated: set[int] = set()
     promoted: set[int] = set()
     for pc, xc in pairs:
@@ -355,11 +408,29 @@ def corroborate_from_semantic(
         # but irrelevant new locator (claim verified on the shared source
         # alone) must not drive high (Codex round-6 P1)
         xc_locs = {e.source.locator() for e in xc.evidence if e.supports}
-        if (pc.verdict is Verdict.SUPPORTED
-                and pc.confidence == "medium"
-                and pc_locs and (xc_locs - pc_locs)):
+        # Evaluate the promotion predicate ONCE, before mutating confidence:
+        # promoting sets pc.confidence to 'high', so re-checking '== medium'
+        # afterwards would misclassify every actual promotion as
+        # sem_no_promotion (Codex P2, PR #16 round 1).
+        will_promote = (pc.verdict is Verdict.SUPPORTED
+                        and pc.confidence == "medium"
+                        and pc_locs and (xc_locs - pc_locs))
+        if will_promote:
             pc.confidence = "high"
             promoted.add(id(pc))
+        if breakdown is not None:
+            # per-pair yield diagnostic (counts pairs, not distinct primaries)
+            if will_promote:
+                breakdown["sem_promoted"] = breakdown.get("sem_promoted", 0) + 1
+            elif not (xc_locs - pc_locs):
+                breakdown["sem_same_sources"] = \
+                    breakdown.get("sem_same_sources", 0) + 1
+            elif pc.verdict is Verdict.SUPPORTED:
+                breakdown["sem_no_promotion"] = \
+                    breakdown.get("sem_no_promotion", 0) + 1
+            else:
+                breakdown["sem_primary_not_promotable"] = \
+                    breakdown.get("sem_primary_not_promotable", 0) + 1
         _adopt_evidence(pc, xc)
     return len(corroborated), len(promoted), pairs
 
