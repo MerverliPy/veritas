@@ -77,7 +77,9 @@ def test_code_surface_overview_and_git_tracked(tmp_path: Path):
     (repo / "pkg" / "mod.py").write_text("def run():\n    return 42\n")
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "seed"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-q", "-m", "seed"], check=True)
 
     p = build_providers([Surface.CODE], code_root=repo)[0]
     ov = p.overview()
