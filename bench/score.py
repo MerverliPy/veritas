@@ -152,6 +152,11 @@ _POSTPOSED_CHRONO = re.compile(
     r"\b([A-Za-z]+)'s\s+patents?\b[^.]{0,60}?\b"
     r"(?:was|were|is|are|filed|came|been|issued)"
     r"\s+(?:much\s+|somewhat\s+|slightly\s+|even\s+)?(earlier|later)\b")
+_OF_POSTPOSED_CHRONO = re.compile(
+    r"\bpatents?\s+of\s+(?:the\s+)?"
+    r"(?P<owner>[A-Za-z]+(?:\s+[A-Za-z]+){0,2}?)"
+    r"(?:,?\s+(?:which\s+)?(?:was|were|is|are)\b)[^.]{0,50}?\b"
+    r"(?P<sign>earlier|later)\b")
 
 
 def _chrono_pairs(text: str) -> frozenset[tuple[str | None, str]]:
@@ -164,6 +169,8 @@ def _chrono_pairs(text: str) -> frozenset[tuple[str | None, str]]:
         pairs.add((m.group(1).rstrip("'s"), m.group(2)))
     for m in _POSTPOSED_CHRONO.finditer(low):
         pairs.add((m.group(1).rstrip("'s"), m.group(2)))
+    for m in _OF_POSTPOSED_CHRONO.finditer(low):
+        pairs.add((m.group("owner").split()[-1], m.group("sign")))
     # ownerless preposed signs ('an earlier patent', 'the later patents')
     # still assert a patent's chronology unless an owner-form already
     # covered that same occurrence.
@@ -322,7 +329,8 @@ _AWARD_PAIR = re.compile(
 _AWARD_SINGLE = re.compile(
     r"\b(" + _NAME + r")\s+(?:won|shared|received|was\s+awarded)\b")
 _AWARD_WITH = re.compile(
-    r"\b(?:with|alongside)\s+(" + _NAME + r")\b")
+    r"\b(?:with|alongside)\s+(?P<names>" + _NAME
+    + r"(?:\s+and\s+" + _NAME + r")*)\b")
 _AWARD_VERB = re.compile(r"\b(?:won|shared|received|awarded)\b")
 _AWARD_TO = re.compile(r"\bawarded\s+to\s+(" + _NAME + r")"
                        r"(?:\s+and\s+(" + _NAME + r"))?")
@@ -352,9 +360,10 @@ def _claim_winners(text: str) -> set[str]:
         out.add(m.group(1).split()[-1])
     if _AWARD_VERB.search(text):
         for w in _AWARD_WITH.finditer(text):
-            sur = w.group(1).split()[-1]
-            if sur.lower() not in _NON_PERSON:
-                out.add(sur)
+            for name in w.group("names").split(" and "):
+                sur = name.split()[-1]
+                if sur.lower() not in _NON_PERSON:
+                    out.add(sur)
     return out
 
 

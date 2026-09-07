@@ -1330,6 +1330,22 @@ def test_d2_radio_priority_claims_never_certified():
                         "and 11 invalid because Stone's earlier patent "
                         "predated Marconi's later patent.",
                         expected) == "correct"
+    # round 25: complete recipient coordination, statement-vs-demonstration,
+    # reported-vs-established reception, and 'patent of OWNER' chronology
+    assert gold_verdict("Guglielmo Marconi shared the 1909 Nobel Prize in "
+                        "Physics with Karl Ferdinand Braun and Nikola Tesla.",
+                        expected) != "correct"
+    assert gold_verdict("In 1893 Nikola Tesla demonstrated that his wireless "
+                        "system could transmit intelligible signals or power "
+                        "to any distance without connecting wires.",
+                        expected) == "incorrect"
+    assert gold_verdict("In December 1901 Guglielmo Marconi received a "
+                        "transatlantic wireless signal at St John's, "
+                        "Newfoundland, transmitted from his station at Poldhu, "
+                        "Cornwall.", expected) == "incorrect"
+    assert gold_verdict("In 1943 the Supreme Court held claims 10 and 11 "
+                        "invalid because the patent of Stone was later.",
+                        expected) != "correct"
     # 'No.' patent abbreviation is not a negation (round-8 P2 matcher fix)
     assert gold_verdict("Tesla's patent No. 645,576 for wireless "
                         "transmission was filed in 1897 and granted in "
