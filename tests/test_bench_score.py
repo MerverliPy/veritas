@@ -458,6 +458,20 @@ def test_a3_judge_mixed_subquestion_stays_resolved():
     assert m["subquestion_unresolved_n"] == 0
 
 
+def test_a3_claims_less_judge_on_run_reports_judge_arm():
+    """Codex P2 (PR #17 round 1): a claims-less U ledger takes the early
+    return; the provenance arm must still read 'judge' when the judge is on,
+    not 'confidence-only'."""
+    g = gold("U", [])
+    l = ledger([], gaps=["no evidence found for: sq-x"])
+    m = compute_query_metrics(l, g, claim_judge=_fake_claim_judge({}))
+    assert m["subquestion_offtopic_arm"] == "judge"
+    assert m["subquestion_total_n"] == 1
+    assert m["subquestion_unresolved_n"] == 1
+    m2 = compute_query_metrics(l, g)
+    assert m2["subquestion_offtopic_arm"] == "confidence-only"
+
+
 def test_normalized_conf_l1_and_subquestion_jaccard():
     from bench.score import normalized_conf_l1, subquestion_jaccard
     same_a = ledger([claim("X.", confidence="medium") for _ in range(4)])

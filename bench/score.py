@@ -627,8 +627,13 @@ def compute_query_metrics(ledger: dict, gold: dict | None,
     if gold is None or not claims:
         # A claims-less U ledger still registers gap-named sub-questions as
         # honestly unresolved (re-spec A3) — the pipeline admitted failure.
+        # Pass an EMPTY label map (not None) when the judge is on so
+        # subquestion_offtopic_arm stays truthful for these runs too
+        # (Codex P2, PR #17 round 1); with no claims there is nothing to
+        # label, so the map is safe.
         if cls == "U" and gold is not None:
-            _subquestion_honest_failure(m, ledger)
+            _subquestion_honest_failure(
+                m, ledger, {} if claim_judge is not None else None)
         return m
 
     expected = gold.get("expected_claims", [])
